@@ -1,18 +1,35 @@
 import mitmproxy.http
 from mitmproxy import ctx
 import json
+import re
 
 class BlockSites:
     def __init__(self):
         self.blocked_sites_file = 'blocked_sites.json'
-        self.blocked_sites = self.load_blocked_sites()
+        self.blocked_sites = []
+        self.categories = []
+        self.load_blocked_sites()
+        self.pattern = self.create_pattern_from_categories()  # Create the pattern from categories
 
     def load_blocked_sites(self):
         try:
             with open(self.blocked_sites_file, 'r') as file:
-                return json.load(file)
+                data = json.load(file)
+                self.blocked_sites = data.get("sites", [])
+                self.categories = data.get("categories", [])
         except FileNotFoundError:
-            return []
+            ctx.log.error(f"{self.blocked_sites_file} not found. Ensure the file exists and is correctly formatted.")
+        except json.JSONDecodeError:
+            ctx.log.error(f"Error decoding {self.blocked_sites_file}. Ensure it contains valid JSON.")
+
+    def create_pattern_from_categories(self):
+        # Create a regex pattern from the categories list
+        if not self.categories:
+            return re.compile("")  # Return an empty pattern if no categories are present
+        
+        # Join categories into a pattern, using "|" (OR) for regex matching
+        pattern_string = "|".join(map(re.escape, self.categories))
+        return re.compile(pattern_string, re.IGNORECASE)
 
     def request(self, flow: mitmproxy.http.HTTPFlow) -> None:
         # Block requests to specific domains immediately
@@ -26,12 +43,12 @@ class BlockSites:
             return  # Prevent further processing of this flow
 
     def response(self, flow: mitmproxy.http.HTTPFlow) -> None:
-        # Optional: Additional blocking logic based on response content
         try:
             if flow.response and flow.response.content:
-                if b"violence" in flow.response.content:
+                content = flow.response.content.decode('utf-8', errors='ignore')  # Decode content to string
+                if self.pattern.search(content):  # Search for the pattern from categories
                     flow.response = mitmproxy.http.Response.make(
-                        403,
+                        403,  # Forbidden status code
                         b"Blocked due to content",
                         {"Content-Type": "text/html"}
                     )
