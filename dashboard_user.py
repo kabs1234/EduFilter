@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox
 )
-from setup_proxy_and_mitm import launch_proxy
+from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 
 
 class AddSiteDialog(QDialog):
@@ -108,6 +108,23 @@ class DashboardWindow(QMainWindow):
                     self.content_table.removeRow(selected_row)
         else:
             QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
+
+    def closeEvent(self, event):
+        # Call disable_windows_proxy before closing the window
+
+        # Ask for confirmation before closing the window
+        confirmation = QMessageBox.question(
+            self, "Confirm Exit", "Are you sure you want to exit?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if confirmation == QMessageBox.StandardButton.Yes:
+            # Perform any other necessary actions before closing, such as saving data
+            disable_windows_proxy()
+            self.save_blocked_sites()  # Save the blocked sites before closing
+            event.accept()  # Proceed with closing the window
+        else:
+            event.ignore()  # Cancel the close event (window stays open)
 
 
 if __name__ == '__main__':
