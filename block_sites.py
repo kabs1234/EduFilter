@@ -1,11 +1,18 @@
 import mitmproxy.http
 from mitmproxy import ctx
-
+import json
 
 class BlockSites:
     def __init__(self):
-        # List of domains or URLs to block
-        self.blocked_sites = ["web.telegram.org", "example.com", "github.com"]
+        self.blocked_sites_file = 'blocked_sites.json'
+        self.blocked_sites = self.load_blocked_sites()
+
+    def load_blocked_sites(self):
+        try:
+            with open(self.blocked_sites_file, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return []
 
     def request(self, flow: mitmproxy.http.HTTPFlow) -> None:
         # Block requests to specific domains immediately

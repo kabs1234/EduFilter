@@ -2,7 +2,6 @@ import subprocess
 import winreg as reg
 import elevate
 
-
 # Function to set the proxy in Windows registry
 def set_windows_proxy(proxy_address='127.0.0.1', proxy_port=8080):
     try:
@@ -32,6 +31,6 @@ def start_mitmproxy():
         print(f"Error starting mitmproxy: {e}")
 
 
-if __name__ == '__main__':
+def launch_proxy():
     set_proxy_automatically()
     start_mitmproxy()

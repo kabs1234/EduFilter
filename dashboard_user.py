@@ -1,66 +1,9 @@
 import json
-import subprocess
-import winreg as reg
-import elevate
-import platform
 from PyQt6.QtWidgets import (
-    QMainWindow, QLabel, QTableWidget, QTableWidgetItem,
+    QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox
 )
-from filter_settings import FilterSettingsWindow  # Import FilterSettingsWindow from filter_settings.py
-import mitmproxy.http
-from mitmproxy import ctx
-
-
-# Function to set the proxy in Windows registry
-def set_windows_proxy(proxy_address='127.0.0.1', proxy_port=8080):
-    try:
-        registry_key = reg.OpenKey(
-            reg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", 0, reg.KEY_WRITE
-        )
-        reg.SetValueEx(registry_key, "ProxyEnable", 0, reg.REG_DWORD, 1)
-        reg.SetValueEx(registry_key, "ProxyServer", 0, reg.REG_SZ, f"{proxy_address}:{proxy_port}")
-        reg.CloseKey(registry_key)
-        print(f"Proxy is set to {proxy_address}:{proxy_port} in Windows settings.")
-    except Exception as e:
-        print(f"Error setting proxy in Windows registry: {e}")
-
-
-# Function to automatically set the proxy in Windows
-def set_proxy_automatically():
-    elevate.elevate()
-    set_windows_proxy()
-
-
-class BlockSites:
-    def __init__(self):
-        self.blocked_sites_file = 'blocked_sites.json'
-        self.blocked_sites = self.load_blocked_sites()
-
-    def load_blocked_sites(self):
-        try:
-            with open(self.blocked_sites_file, 'r') as file:
-                return json.load(file)
-        except FileNotFoundError:
-            return []
-
-    def request(self, flow: mitmproxy.http.HTTPFlow) -> None:
-        if any(blocked_site in flow.request.pretty_url for blocked_site in self.blocked_sites):
-            flow.response = mitmproxy.http.Response.make(
-                403,  # HTTP Forbidden
-                b"Blocked Site",  # Response body
-                {"Content-Type": "text/html"}
-            )
-            print(f"Blocked {flow.request.pretty_url}")
-
-# Function to start mitmproxy with the BlockSites script
-def start_mitmproxy():
-    try:
-        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', __file__])
-        print("mitmproxy is running at 127.0.0.1:8080")
-    except Exception as e:
-        print(f"Error starting mitmproxy: {e}")
+from setup_proxy_and_mitm import launch_proxy
 
 
 class AddSiteDialog(QDialog):
@@ -166,15 +109,12 @@ class DashboardWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
 
-    def start_proxy(self):
-        set_proxy_automatically()
-        start_mitmproxy()
-
 
 if __name__ == '__main__':
     import sys
     from PyQt6.QtWidgets import QApplication
 
+    launch_proxy()
     app = QApplication(sys.argv)
     window = DashboardWindow()
     window.show()
