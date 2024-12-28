@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox
 )
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
+import subprocess
 
 
 class AddSiteDialog(QDialog):
@@ -89,8 +90,10 @@ class DashboardWindow(QMainWindow):
                 self.blocked_sites.append(site)
                 self.save_blocked_sites()
                 self.add_to_content_table(site)
+                self.restart_mitmproxy()  # Restart mitmproxy
             else:
                 QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked list.")
+
 
     def delete_selected_site(self):
         selected_row = self.content_table.currentRow()
@@ -106,6 +109,7 @@ class DashboardWindow(QMainWindow):
                     self.blocked_sites.remove(site)
                     self.save_blocked_sites()
                     self.content_table.removeRow(selected_row)
+                    self.restart_mitmproxy()  # Restart mitmproxy
         else:
             QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
 
@@ -126,6 +130,12 @@ class DashboardWindow(QMainWindow):
         else:
             event.ignore()  # Cancel the close event (window stays open)
 
+
+    def restart_mitmproxy(self):
+        # Kill the existing mitmproxy process (if any)
+        subprocess.call(["taskkill", "/F", "/IM", "mitmproxy.exe"])
+        # Restart mitmproxy with the updated list
+        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
 
 if __name__ == '__main__':
     import sys
