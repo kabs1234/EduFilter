@@ -1,1 +1,8 @@
-{"sites": ["web.telegram.org", "example.com", "github.com"], "categories": []}
+{
+  "sites": ["web.telegram.org", "example.com"],
+  "categories": {
+      "social networking": ["social", "networking"],
+      "pornography": ["adult", "porn", "xxx", "explicit", "18+"],
+      "shopping": ["buy", "shop", "sale", "discount"]
+  }
+}

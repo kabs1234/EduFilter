@@ -45,3 +45,5 @@ def start_mitmproxy():
 def launch_proxy():
     set_proxy_automatically()
     start_mitmproxy()
+
+launch_proxy()
