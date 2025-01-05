@@ -1,7 +1,7 @@
 import json
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, QInputDialog
+    QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, QInputDialog, QTabWidget
 )
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
@@ -26,72 +26,6 @@ class AddSiteDialog(QDialog):
         return self.site_input.text()
 
 
-class ExcludedSitesDialog(QDialog):
-    def __init__(self, excluded_sites, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Excluded Sites')
-        self.excluded_sites = excluded_sites
-        self.parent = parent  # Reference to the parent (DashboardWindow)
-
-        self.layout = QVBoxLayout()
-
-        self.excluded_table = QTableWidget(self)
-        self.excluded_table.setColumnCount(1)
-        self.excluded_table.setHorizontalHeaderLabels(['Excluded Sites'])
-        self.populate_excluded_table()
-
-        self.add_site_button = QPushButton('Add Site', self)
-        self.add_site_button.clicked.connect(self.open_add_site_dialog)
-
-        self.delete_site_button = QPushButton('Delete Site', self)
-        self.delete_site_button.clicked.connect(self.delete_selected_site)
-
-        self.layout.addWidget(self.excluded_table)
-        self.layout.addWidget(self.add_site_button)
-        self.layout.addWidget(self.delete_site_button)
-
-        self.setLayout(self.layout)
-
-    def populate_excluded_table(self):
-        self.excluded_table.setRowCount(0)  # Clear existing rows
-        for site in self.excluded_sites:
-            self.add_to_excluded_table(site)
-
-    def add_to_excluded_table(self, site):
-        row_position = self.excluded_table.rowCount()
-        self.excluded_table.insertRow(row_position)
-        self.excluded_table.setItem(row_position, 0, QTableWidgetItem(site))
-
-    def open_add_site_dialog(self):
-        dialog = AddSiteDialog(self)
-        if dialog.exec():
-            site = dialog.get_input()
-            if site:
-                if site in self.excluded_sites:
-                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the excluded list.")
-                    return
-                self.excluded_sites.append(site)
-                self.populate_excluded_table()
-                self.parent.save_blocked_sites()  # Save changes immediately
-                self.parent.restart_mitmproxy()  # Restart mitmproxy
-
-    def delete_selected_site(self):
-        selected_row = self.excluded_table.currentRow()
-        if selected_row != -1:
-            site_item = self.excluded_table.item(selected_row, 0)
-            if site_item:
-                site = site_item.text()
-                confirmation = QMessageBox.question(
-                    self, "Confirm Delete", f"Are you sure you want to remove {site} from excluded sites?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if confirmation == QMessageBox.StandardButton.Yes:
-                    self.excluded_sites.remove(site)
-                    self.populate_excluded_table()
-                    self.parent.save_blocked_sites()  # Save changes immediately
-                    self.parent.restart_mitmproxy()  # Restart mitmproxy
-
-
 class DashboardWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -103,34 +37,85 @@ class DashboardWindow(QMainWindow):
         # Load blocked sites from file
         self.blocked_sites, self.excluded_sites, self.category_keywords = self.load_blocked_sites()
 
-        # Content Table for Blocked Sites
-        self.blocked_table = QTableWidget(self)
+        # Create tabs
+        self.tab_widget = QTabWidget()
+        self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
+        self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
+        self.tab_widget.addTab(self.create_categories_tab(), "Categories")
+
+        self.setCentralWidget(self.tab_widget)
+
+    def create_blocked_sites_tab(self):
+        # Blocked sites table
+        self.blocked_table = QTableWidget()
         self.blocked_table.setColumnCount(1)
         self.blocked_table.setHorizontalHeaderLabels(['Blocked Sites'])
         self.populate_blocked_table()
 
-        # Add Site Button
-        self.add_site_button = QPushButton('Add Site', self)
-        self.add_site_button.clicked.connect(self.open_add_site_dialog)
+        # Add and delete buttons
+        add_site_button = QPushButton('Add Site')
+        add_site_button.clicked.connect(self.open_add_site_dialog)
 
-        # Delete Site Button
-        self.delete_site_button = QPushButton('Delete Site', self)
-        self.delete_site_button.clicked.connect(self.delete_selected_site)
-
-        # Excluded Sites Button
-        self.excluded_sites_button = QPushButton('Excluded Sites', self)
-        self.excluded_sites_button.clicked.connect(self.open_excluded_sites_dialog)
+        delete_site_button = QPushButton('Delete Site')
+        delete_site_button.clicked.connect(self.delete_selected_site)
 
         # Layout
         layout = QVBoxLayout()
         layout.addWidget(self.blocked_table)
-        layout.addWidget(self.add_site_button)
-        layout.addWidget(self.delete_site_button)
-        layout.addWidget(self.excluded_sites_button)
+        layout.addWidget(add_site_button)
+        layout.addWidget(delete_site_button)
 
         container = QWidget()
         container.setLayout(layout)
-        self.setCentralWidget(container)
+        return container
+
+    def create_excluded_sites_tab(self):
+        # Excluded sites table
+        self.excluded_table = QTableWidget()
+        self.excluded_table.setColumnCount(1)
+        self.excluded_table.setHorizontalHeaderLabels(['Excluded Sites'])
+        self.populate_excluded_table()
+
+        # Add and delete buttons
+        add_site_button = QPushButton('Add Site')
+        add_site_button.clicked.connect(self.open_add_site_dialog)
+
+        delete_site_button = QPushButton('Delete Site')
+        delete_site_button.clicked.connect(self.delete_selected_site)
+
+        # Layout
+        layout = QVBoxLayout()
+        layout.addWidget(self.excluded_table)
+        layout.addWidget(add_site_button)
+        layout.addWidget(delete_site_button)
+
+        container = QWidget()
+        container.setLayout(layout)
+        return container
+
+    def create_categories_tab(self):
+        # Categories table
+        self.categories_table = QTableWidget()
+        self.categories_table.setColumnCount(2)
+        self.categories_table.setHorizontalHeaderLabels(['Category', 'Keywords'])
+        self.populate_categories_table()
+
+        # Add and delete buttons
+        add_category_button = QPushButton('Add Category')
+        add_category_button.clicked.connect(self.add_category)
+
+        delete_category_button = QPushButton('Delete Category')
+        delete_category_button.clicked.connect(self.delete_category)
+
+        # Layout
+        layout = QVBoxLayout()
+        layout.addWidget(self.categories_table)
+        layout.addWidget(add_category_button)
+        layout.addWidget(delete_category_button)
+
+        container = QWidget()
+        container.setLayout(layout)
+        return container
 
     def load_blocked_sites(self):
         try:
@@ -150,7 +135,7 @@ class DashboardWindow(QMainWindow):
             json.dump(data, file)
 
     def populate_blocked_table(self):
-        self.blocked_table.setRowCount(0)  # Clear existing rows
+        self.blocked_table.setRowCount(0)
         for site in self.blocked_sites:
             self.add_to_blocked_table(site)
 
@@ -159,38 +144,108 @@ class DashboardWindow(QMainWindow):
         self.blocked_table.insertRow(row_position)
         self.blocked_table.setItem(row_position, 0, QTableWidgetItem(site))
 
+    def populate_excluded_table(self):
+        self.excluded_table.setRowCount(0)
+        for site in self.excluded_sites:
+            self.add_to_excluded_table(site)
+
+    def add_to_excluded_table(self, site):
+        row_position = self.excluded_table.rowCount()
+        self.excluded_table.insertRow(row_position)
+        self.excluded_table.setItem(row_position, 0, QTableWidgetItem(site))
+
+    def populate_categories_table(self):
+        self.categories_table.setRowCount(0)
+        for category, keywords in self.category_keywords.items():
+            row_position = self.categories_table.rowCount()
+            self.categories_table.insertRow(row_position)
+            self.categories_table.setItem(row_position, 0, QTableWidgetItem(category))
+            self.categories_table.setItem(row_position, 1, QTableWidgetItem(", ".join(keywords)))
+
     def open_add_site_dialog(self):
         dialog = AddSiteDialog(self)
         if dialog.exec():
             site = dialog.get_input()
             if site:
-                if site in self.blocked_sites:
-                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked list.")
+                if site in self.blocked_sites or site in self.excluded_sites:
+                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked or excluded list.")
                     return
-                self.blocked_sites.append(site)
-                self.populate_blocked_table()
+
+                choice, ok = QInputDialog.getItem(self, "Choose List", "Add site to:", ["Blocked Sites", "Excluded Sites"], 0, False)
+                if ok and choice:
+                    if choice == "Blocked Sites":
+                        self.blocked_sites.append(site)
+                        self.populate_blocked_table()
+                    elif choice == "Excluded Sites":
+                        self.excluded_sites.append(site)
+                        self.populate_excluded_table()
+
                 self.save_blocked_sites()
                 self.restart_mitmproxy()
 
     def delete_selected_site(self):
-        selected_row = self.blocked_table.currentRow()
-        if selected_row != -1:
-            site_item = self.blocked_table.item(selected_row, 0)
+        selected_row_blocked = self.blocked_table.currentRow()
+        selected_row_excluded = self.excluded_table.currentRow()
+
+        if selected_row_blocked != -1:
+            site_item = self.blocked_table.item(selected_row_blocked, 0)
             if site_item:
                 site = site_item.text()
+                self.confirm_delete_site(site, "Blocked Sites", selected_row_blocked)
+        elif selected_row_excluded != -1:
+            site_item = self.excluded_table.item(selected_row_excluded, 0)
+            if site_item:
+                site = site_item.text()
+                self.confirm_delete_site(site, "Excluded Sites", selected_row_excluded)
+        else:
+            QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
+
+    def confirm_delete_site(self, site, list_name, row):
+        confirmation = QMessageBox.question(
+            self, "Confirm Delete", f"Are you sure you want to remove {site} from {list_name}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirmation == QMessageBox.StandardButton.Yes:
+            if list_name == "Blocked Sites":
+                self.blocked_sites.remove(site)
+                self.populate_blocked_table()
+            elif list_name == "Excluded Sites":
+                self.excluded_sites.remove(site)
+                self.populate_excluded_table()
+
+            self.save_blocked_sites()
+            self.restart_mitmproxy()
+
+    def add_category(self):
+        category_name, ok = QInputDialog.getText(self, "Add Category", "Category Name:")
+        if ok and category_name:
+            keywords, ok = QInputDialog.getText(self, "Add Keywords", "Keywords (comma separated):")
+            if ok:
+                keywords_list = [kw.strip() for kw in keywords.split(',') if kw.strip()]
+                self.category_keywords[category_name] = keywords_list
+                self.save_blocked_sites()
+                self.populate_categories_table()
+                self.restart_mitmproxy()
+
+    def delete_category(self):
+        selected_row = self.categories_table.currentRow()
+        if selected_row != -1:
+            category_item = self.categories_table.item(selected_row, 0)
+            if category_item:
+                category_name = category_item.text()
                 confirmation = QMessageBox.question(
-                    self, "Confirm Delete", f"Are you sure you want to remove {site} from blocked sites?",
+                    self, "Confirm Delete", f"Are you sure you want to delete category '{category_name}'?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
                 if confirmation == QMessageBox.StandardButton.Yes:
-                    self.blocked_sites.remove(site)
-                    self.populate_blocked_table()
+                    del self.category_keywords[category_name]
                     self.save_blocked_sites()
+                    self.populate_categories_table()
                     self.restart_mitmproxy()
 
-    def open_excluded_sites_dialog(self):
-        dialog = ExcludedSitesDialog(self.excluded_sites, self)
-        dialog.exec()
+    def restart_mitmproxy(self):
+        subprocess.call(["taskkill", "/F", "/IM", "mitmproxy.exe"])
+        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
 
     def closeEvent(self, event):
         confirmation = QMessageBox.question(
@@ -204,10 +259,6 @@ class DashboardWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-
-    def restart_mitmproxy(self):
-        subprocess.call(["taskkill", "/F", "/IM", "mitmproxy.exe"])
-        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
 
 
 if __name__ == '__main__':

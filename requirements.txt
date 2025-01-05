@@ -1,0 +1,7 @@
+mitmproxy==10.1.4
+PyQt6==6.6.0
+transformers==4.47.1
+torch==2.0.1
+torchvision==0.15.2
+torchaudio==2.0.2
+elevate==0.1.2

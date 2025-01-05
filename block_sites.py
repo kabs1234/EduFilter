@@ -69,10 +69,12 @@ class BlockSites:
                 content = flow.response.content.decode('utf-8', errors='ignore')
                 for category, keywords in self.category_keywords.items():
                     pattern = self.create_pattern_for_keywords(keywords)
-                    if pattern and len(pattern.findall(content)) > 3:  # Match threshold for dynamic blocking
-                        self.show_warning_page(flow, f"Blocked due to inappropriate content in category: {category}.")
-                        ctx.log.info(f"Blocked content from {flow.request.pretty_url} due to category: {category}")
-                        return
+                    if pattern:
+                        matches = pattern.findall(content)
+                        if matches:  # Block if any keyword is found
+                            self.show_warning_page(flow, f"Blocked due to inappropriate content in category: {category}.")
+                            ctx.log.info(f"Blocked content from {flow.request.pretty_url} due to category: {category}")
+                            return
         except Exception as e:
             ctx.log.error(f"Error processing response: {e}")
 
