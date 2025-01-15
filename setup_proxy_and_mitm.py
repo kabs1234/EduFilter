@@ -36,7 +36,7 @@ def set_proxy_automatically():
 # Function to start mitmproxy
 def start_mitmproxy():
     try:
-        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
+        subprocess.Popen(['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
         print("mitmproxy is running at 127.0.0.1:8080")
     except Exception as e:
         print(f"Error starting mitmproxy: {e}")
