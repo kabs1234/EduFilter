@@ -5,10 +5,14 @@ import psycopg2
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
-    QInputDialog, QTabWidget, QLabel
+    QInputDialog, QTabWidget, QLabel, QCheckBox
 )
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
+import random
+import string
+from datetime import datetime, timedelta
+from email_utils import send_2fa_code
 
 
 class BaseDialog(QDialog):
@@ -30,6 +34,20 @@ class AddSiteDialog(BaseDialog):
 
     def get_input(self):
         return self.site_input.text()
+
+
+class TwoFactorDialog(BaseDialog):
+    def __init__(self, parent=None):
+        super().__init__('Two-Factor Authentication', parent)
+        self.code_input = QLineEdit()
+        self.layout.addRow("Enter Code:", self.code_input)
+        
+        verify_button = QPushButton("Verify")
+        verify_button.clicked.connect(self.accept)
+        self.layout.addWidget(verify_button)
+    
+    def get_code(self):
+        return self.code_input.text().strip()
 
 
 class LoginDialog(BaseDialog):
@@ -56,7 +74,35 @@ class LoginDialog(BaseDialog):
             'password': os.getenv('DB_PASSWORD'),
             'host': os.getenv('DB_HOST')
         }
+        self.current_user_id = None
+
+    def generate_2fa_code(self):
+        return ''.join(random.choices(string.digits, k=6))
+
+    def save_2fa_code(self, cur, user_id, code):
+        # Delete any existing codes for this user
+        cur.execute(
+            "DELETE FROM two_factor_codes WHERE user_id = %s",
+            (user_id,)
+        )
         
+        # Insert new code with 10-minute expiry
+        expiry = datetime.now() + timedelta(minutes=10)
+        cur.execute(
+            "INSERT INTO two_factor_codes (user_id, code, expiry) VALUES (%s, %s, %s)",
+            (user_id, code, expiry)
+        )
+
+    def verify_2fa_code(self, cur, user_id, entered_code):
+        cur.execute(
+            """
+            SELECT code FROM two_factor_codes 
+            WHERE user_id = %s AND code = %s AND expiry > NOW()
+            """,
+            (user_id, entered_code)
+        )
+        return cur.fetchone() is not None
+
     def try_login(self):
         username = self.username_input.text()
         password = self.password_input.text()
@@ -65,15 +111,51 @@ class LoginDialog(BaseDialog):
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
             
+            # Check credentials and get user info
             cur.execute(
-                "SELECT * FROM users WHERE username = %s AND password = %s",
+                """
+                SELECT id, email, is_2fa_enabled 
+                FROM users 
+                WHERE username = %s AND password = %s
+                """,
                 (username, password)
             )
             
-            if cur.fetchone():
-                self.accept()
-            else:
+            user_data = cur.fetchone()
+            if not user_data:
                 QMessageBox.warning(self, 'Login Failed', 'Invalid username or password')
+                return
+
+            user_id, email, is_2fa_enabled = user_data
+            self.current_user_id = user_id  # Store the user ID
+            
+            if is_2fa_enabled:
+                # Generate and save 2FA code
+                code = self.generate_2fa_code()
+                self.save_2fa_code(cur, user_id, code)
+                conn.commit()
+                
+                # Send code via email
+                if not send_2fa_code(email, code):
+                    QMessageBox.critical(self, 'Email Error', 'Failed to send 2FA code')
+                    return
+                
+                # Show 2FA verification dialog
+                two_factor_dialog = TwoFactorDialog(self)
+                if two_factor_dialog.exec():
+                    entered_code = two_factor_dialog.get_code()
+                    if self.verify_2fa_code(cur, user_id, entered_code):
+                        # Delete the used code
+                        cur.execute(
+                            "DELETE FROM two_factor_codes WHERE user_id = %s AND code = %s",
+                            (user_id, entered_code)
+                        )
+                        conn.commit()
+                        self.accept()
+                    else:
+                        QMessageBox.warning(self, 'Verification Failed', 'Invalid or expired 2FA code')
+            else:
+                self.accept()
             
             cur.close()
             conn.close()
@@ -120,6 +202,16 @@ class DashboardWindow(QMainWindow):
         self.setWindowTitle('Content Monitoring Dashboard')
         self.blocked_sites_file = 'blocked_sites.json'
         self.blocked_sites, self.excluded_sites, self.category_keywords = self.load_data()
+        self.current_user_id = None
+        
+        # Load database configuration
+        load_dotenv()
+        self.db_config = {
+            'dbname': os.getenv('DB_NAME'),
+            'user': os.getenv('DB_USER'),
+            'password': os.getenv('DB_PASSWORD'),
+            'host': os.getenv('DB_HOST')
+        }
         
         self.setup_ui()
 
@@ -128,6 +220,7 @@ class DashboardWindow(QMainWindow):
         self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
         self.tab_widget.addTab(self.create_categories_tab(), "Categories")
+        self.tab_widget.addTab(self.create_settings_tab(), "Settings")
         self.setCentralWidget(self.tab_widget)
 
     def create_blocked_sites_tab(self):
@@ -162,6 +255,29 @@ class DashboardWindow(QMainWindow):
         delete_category_button.clicked.connect(self.delete_category)
 
         return self.create_tab_layout(self.categories_table, [add_category_button, delete_category_button])
+
+    def create_settings_tab(self):
+        container = QWidget()
+        layout = QVBoxLayout()
+
+        # 2FA Toggle
+        self.twofa_checkbox = QCheckBox("Enable Two-Factor Authentication")
+        self.twofa_checkbox.stateChanged.connect(self.toggle_2fa)
+        layout.addWidget(self.twofa_checkbox)
+
+        # Email settings
+        email_label = QLabel("Email for 2FA:")
+        self.email_input = QLineEdit()
+        layout.addWidget(email_label)
+        layout.addWidget(self.email_input)
+
+        save_button = QPushButton("Save Settings")
+        save_button.clicked.connect(self.save_settings)
+        layout.addWidget(save_button)
+
+        layout.addStretch()
+        container.setLayout(layout)
+        return container
 
     def create_tab_layout(self, table_widget, buttons):
         layout = QVBoxLayout()
@@ -283,6 +399,88 @@ class DashboardWindow(QMainWindow):
         subprocess.call(["taskkill", "/F", "/IM", "mitmdump.exe"])
         subprocess.Popen(['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
 
+    def load_user_settings(self, user_id):
+        print(f"Loading settings for user ID: {user_id}")  # Debug log
+        self.current_user_id = user_id
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+            
+            cur.execute(
+                "SELECT email, is_2fa_enabled FROM users WHERE id = %s",
+                (user_id,)
+            )
+            user_data = cur.fetchone()
+            
+            if user_data:
+                email, is_2fa_enabled = user_data
+                print(f"Found user settings - Email: {email}, 2FA: {is_2fa_enabled}")  # Debug log
+                self.email_input.setText(email or "")
+                self.twofa_checkbox.setChecked(is_2fa_enabled)
+            else:
+                print(f"No user data found for ID: {user_id}")  # Debug log
+            
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error loading user settings: {str(e)}")  # Debug log
+            QMessageBox.critical(self, 'Database Error', f'Could not load user settings: {str(e)}')
+
+    def toggle_2fa(self, state):
+        if state and not self.email_input.text().strip():
+            QMessageBox.warning(self, 'Email Required', 'Please enter an email address to enable 2FA')
+            self.twofa_checkbox.setChecked(False)
+            return
+
+    def save_settings(self):
+        print(f"Attempting to save settings for user ID: {self.current_user_id}")  # Debug log
+        if not self.current_user_id:
+            print("No user ID found")  # Debug log
+            QMessageBox.warning(self, 'Error', 'No user is currently logged in')
+            return
+
+        email = self.email_input.text().strip()
+        is_2fa_enabled = self.twofa_checkbox.isChecked()
+        print(f"Settings to save - Email: {email}, 2FA: {is_2fa_enabled}")  # Debug log
+
+        if is_2fa_enabled and not email:
+            QMessageBox.warning(self, 'Email Required', 'Please enter an email address to enable 2FA')
+            return
+
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+            
+            # First verify if the user exists
+            cur.execute("SELECT id FROM users WHERE id = %s", (self.current_user_id,))
+            if not cur.fetchone():
+                print(f"User not found in database: {self.current_user_id}")  # Debug log
+                QMessageBox.critical(self, 'Error', 'User not found')
+                return
+            
+            print("Executing update query...")  # Debug log
+            cur.execute(
+                """
+                UPDATE users 
+                SET email = %s, is_2fa_enabled = %s 
+                WHERE id = %s
+                RETURNING id, email, is_2fa_enabled
+                """,
+                (email, is_2fa_enabled, self.current_user_id)
+            )
+            
+            updated_user = cur.fetchone()
+            print(f"Update result: {updated_user}")  # Debug log
+            
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            QMessageBox.information(self, 'Success', 'Settings saved successfully')
+        except Exception as e:
+            print(f"Error saving settings: {str(e)}")  # Debug log
+            QMessageBox.critical(self, 'Database Error', f'Could not save settings: {str(e)}')
+
     def closeEvent(self, event):
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
@@ -304,6 +502,10 @@ if __name__ == '__main__':
     
     login_dialog = LoginDialog()
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
+        print(f"Login successful, user ID: {login_dialog.current_user_id}")  # Debug log
         window = DashboardWindow()
+        window.current_user_id = login_dialog.current_user_id  # Set the user ID
+        print(f"Setting dashboard user ID to: {window.current_user_id}")  # Debug log
+        window.load_user_settings(login_dialog.current_user_id)  # Load settings for logged-in user
         window.show()
         sys.exit(app.exec())
