@@ -11,51 +11,44 @@ from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
 
 
-class AddSiteDialog(QDialog):
-    def __init__(self, parent=None):
+class BaseDialog(QDialog):
+    def __init__(self, title, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Add Site')
+        self.setWindowTitle(title)
         self.layout = QFormLayout()
+        self.setLayout(self.layout)
 
+
+class AddSiteDialog(BaseDialog):
+    def __init__(self, parent=None):
+        super().__init__('Add Site', parent)
         self.site_input = QLineEdit(self)
         self.layout.addRow("Site URL:", self.site_input)
-
         self.add_button = QPushButton("Add", self)
         self.add_button.clicked.connect(self.accept)
         self.layout.addWidget(self.add_button)
-
-        self.setLayout(self.layout)
 
     def get_input(self):
         return self.site_input.text()
 
 
-class LoginDialog(QDialog):
+class LoginDialog(BaseDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Login')
+        super().__init__('Login', parent)
         self.setModal(True)
         self.setMinimumWidth(300)
         
-        layout = QFormLayout()
-        
-        # Username input
         self.username_input = QLineEdit()
-        layout.addRow('Username:', self.username_input)
+        self.layout.addRow('Username:', self.username_input)
         
-        # Password input
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addRow('Password:', self.password_input)
+        self.layout.addRow('Password:', self.password_input)
         
-        # Login button
         login_button = QPushButton('Login')
         login_button.clicked.connect(self.try_login)
-        layout.addRow(login_button)
+        self.layout.addRow(login_button)
         
-        self.setLayout(layout)
-        
-        # Load database configuration
         load_dotenv()
         self.db_config = {
             'dbname': os.getenv('DB_NAME'),
@@ -72,7 +65,6 @@ class LoginDialog(QDialog):
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
             
-            # Check if user exists and password matches
             cur.execute(
                 "SELECT * FROM users WHERE username = %s AND password = %s",
                 (username, password)
@@ -90,106 +82,105 @@ class LoginDialog(QDialog):
             QMessageBox.critical(self, 'Database Error', f'Could not connect to database: {str(e)}')
 
 
+class SiteTable(QTableWidget):
+    def __init__(self, header_label):
+        super().__init__()
+        self.setColumnCount(1)
+        self.setHorizontalHeaderLabels([header_label])
+
+    def populate(self, sites):
+        self.setRowCount(0)
+        for site in sites:
+            self.add_site(site)
+
+    def add_site(self, site):
+        row_position = self.rowCount()
+        self.insertRow(row_position)
+        self.setItem(row_position, 0, QTableWidgetItem(site))
+
+
+class CategoryTable(QTableWidget):
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(2)
+        self.setHorizontalHeaderLabels(['Category', 'Keywords'])
+
+    def populate(self, categories):
+        self.setRowCount(0)
+        for category, keywords in categories.items():
+            row_position = self.rowCount()
+            self.insertRow(row_position)
+            self.setItem(row_position, 0, QTableWidgetItem(category))
+            self.setItem(row_position, 1, QTableWidgetItem(", ".join(keywords)))
+
+
 class DashboardWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Content Monitoring Dashboard')
-
-        # File to store blocked sites
         self.blocked_sites_file = 'blocked_sites.json'
+        self.blocked_sites, self.excluded_sites, self.category_keywords = self.load_data()
+        
+        self.setup_ui()
 
-        # Load blocked sites from file
-        self.blocked_sites, self.excluded_sites, self.category_keywords = self.load_blocked_sites()
-
-        # Create tabs
+    def setup_ui(self):
         self.tab_widget = QTabWidget()
         self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
         self.tab_widget.addTab(self.create_categories_tab(), "Categories")
-
         self.setCentralWidget(self.tab_widget)
 
     def create_blocked_sites_tab(self):
-        # Blocked sites table
-        self.blocked_table = QTableWidget()
-        self.blocked_table.setColumnCount(1)
-        self.blocked_table.setHorizontalHeaderLabels(['Blocked Sites'])
-        self.populate_blocked_table()
-
-        # Add and delete buttons
+        self.blocked_table = SiteTable('Blocked Sites')
+        self.blocked_table.populate(self.blocked_sites)
+        
         add_site_button = QPushButton('Add Site')
         add_site_button.clicked.connect(self.open_add_site_dialog)
-
         delete_site_button = QPushButton('Delete Site')
         delete_site_button.clicked.connect(self.delete_selected_site)
 
-        # Layout
-        layout = QVBoxLayout()
-        layout.addWidget(self.blocked_table)
-        layout.addWidget(add_site_button)
-        layout.addWidget(delete_site_button)
-
-        container = QWidget()
-        container.setLayout(layout)
-        return container
+        return self.create_tab_layout(self.blocked_table, [add_site_button, delete_site_button])
 
     def create_excluded_sites_tab(self):
-        # Excluded sites table
-        self.excluded_table = QTableWidget()
-        self.excluded_table.setColumnCount(1)
-        self.excluded_table.setHorizontalHeaderLabels(['Excluded Sites'])
-        self.populate_excluded_table()
-
-        # Add and delete buttons
+        self.excluded_table = SiteTable('Excluded Sites')
+        self.excluded_table.populate(self.excluded_sites)
+        
         add_site_button = QPushButton('Add Site')
         add_site_button.clicked.connect(self.open_add_site_dialog)
-
         delete_site_button = QPushButton('Delete Site')
         delete_site_button.clicked.connect(self.delete_selected_site)
 
-        # Layout
-        layout = QVBoxLayout()
-        layout.addWidget(self.excluded_table)
-        layout.addWidget(add_site_button)
-        layout.addWidget(delete_site_button)
-
-        container = QWidget()
-        container.setLayout(layout)
-        return container
+        return self.create_tab_layout(self.excluded_table, [add_site_button, delete_site_button])
 
     def create_categories_tab(self):
-        # Categories table
-        self.categories_table = QTableWidget()
-        self.categories_table.setColumnCount(2)
-        self.categories_table.setHorizontalHeaderLabels(['Category', 'Keywords'])
-        self.populate_categories_table()
-
-        # Add and delete buttons
+        self.categories_table = CategoryTable()
+        self.categories_table.populate(self.category_keywords)
+        
         add_category_button = QPushButton('Add Category')
         add_category_button.clicked.connect(self.add_category)
-
         delete_category_button = QPushButton('Delete Category')
         delete_category_button.clicked.connect(self.delete_category)
 
-        # Layout
-        layout = QVBoxLayout()
-        layout.addWidget(self.categories_table)
-        layout.addWidget(add_category_button)
-        layout.addWidget(delete_category_button)
+        return self.create_tab_layout(self.categories_table, [add_category_button, delete_category_button])
 
+    def create_tab_layout(self, table_widget, buttons):
+        layout = QVBoxLayout()
+        layout.addWidget(table_widget)
+        for button in buttons:
+            layout.addWidget(button)
         container = QWidget()
         container.setLayout(layout)
         return container
 
-    def load_blocked_sites(self):
+    def load_data(self):
         try:
             with open(self.blocked_sites_file, 'r') as file:
                 data = json.load(file)
                 return data.get("sites", []), data.get("excluded_sites", []), data.get("categories", {})
-        except (FileNotFoundError, json.JSONDecodeError) as e:
+        except (FileNotFoundError, json.JSONDecodeError):
             return [], [], {}
 
-    def save_blocked_sites(self):
+    def save_data(self):
         data = {
             "sites": self.blocked_sites,
             "excluded_sites": self.excluded_sites,
@@ -198,86 +189,64 @@ class DashboardWindow(QMainWindow):
         with open(self.blocked_sites_file, 'w') as file:
             json.dump(data, file)
 
-    def populate_blocked_table(self):
-        self.blocked_table.setRowCount(0)
-        for site in self.blocked_sites:
-            self.add_to_blocked_table(site)
-
-    def add_to_blocked_table(self, site):
-        row_position = self.blocked_table.rowCount()
-        self.blocked_table.insertRow(row_position)
-        self.blocked_table.setItem(row_position, 0, QTableWidgetItem(site))
-
-    def populate_excluded_table(self):
-        self.excluded_table.setRowCount(0)
-        for site in self.excluded_sites:
-            self.add_to_excluded_table(site)
-
-    def add_to_excluded_table(self, site):
-        row_position = self.excluded_table.rowCount()
-        self.excluded_table.insertRow(row_position)
-        self.excluded_table.setItem(row_position, 0, QTableWidgetItem(site))
-
-    def populate_categories_table(self):
-        self.categories_table.setRowCount(0)
-        for category, keywords in self.category_keywords.items():
-            row_position = self.categories_table.rowCount()
-            self.categories_table.insertRow(row_position)
-            self.categories_table.setItem(row_position, 0, QTableWidgetItem(category))
-            self.categories_table.setItem(row_position, 1, QTableWidgetItem(", ".join(keywords)))
-
     def open_add_site_dialog(self):
         dialog = AddSiteDialog(self)
         if dialog.exec():
             site = dialog.get_input()
-            if site:
-                if site in self.blocked_sites or site in self.excluded_sites:
-                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked or excluded list.")
-                    return
+            if not site:
+                return
+                
+            if site in self.blocked_sites or site in self.excluded_sites:
+                QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked or excluded list.")
+                return
 
-                choice, ok = QInputDialog.getItem(self, "Choose List", "Add site to:", ["Blocked Sites", "Excluded Sites"], 0, False)
-                if ok and choice:
-                    if choice == "Blocked Sites":
-                        self.blocked_sites.append(site)
-                        self.populate_blocked_table()
-                    elif choice == "Excluded Sites":
-                        self.excluded_sites.append(site)
-                        self.populate_excluded_table()
+            choice, ok = QInputDialog.getItem(
+                self, "Choose List", "Add site to:", 
+                ["Blocked Sites", "Excluded Sites"], 0, False
+            )
+            if ok and choice:
+                if choice == "Blocked Sites":
+                    self.blocked_sites.append(site)
+                    self.blocked_table.populate(self.blocked_sites)
+                else:
+                    self.excluded_sites.append(site)
+                    self.excluded_table.populate(self.excluded_sites)
 
-                self.save_blocked_sites()
+                self.save_data()
                 self.restart_mitmproxy()
 
     def delete_selected_site(self):
-        selected_row_blocked = self.blocked_table.currentRow()
-        selected_row_excluded = self.excluded_table.currentRow()
-
-        if selected_row_blocked != -1:
-            site_item = self.blocked_table.item(selected_row_blocked, 0)
-            if site_item:
-                site = site_item.text()
-                self.confirm_delete_site(site, "Blocked Sites", selected_row_blocked)
-        elif selected_row_excluded != -1:
-            site_item = self.excluded_table.item(selected_row_excluded, 0)
-            if site_item:
-                site = site_item.text()
-                self.confirm_delete_site(site, "Excluded Sites", selected_row_excluded)
-        else:
+        current_tab = self.tab_widget.currentWidget()
+        table = None
+        sites_list = None
+        
+        if current_tab.findChild(SiteTable):
+            table = current_tab.findChild(SiteTable)
+            if table == self.blocked_table:
+                sites_list = self.blocked_sites
+            else:
+                sites_list = self.excluded_sites
+        
+        if not table or table.currentRow() == -1:
             QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
+            return
+            
+        site_item = table.item(table.currentRow(), 0)
+        if site_item:
+            site = site_item.text()
+            list_name = "Blocked Sites" if table == self.blocked_table else "Excluded Sites"
+            self.confirm_delete_site(site, list_name, sites_list, table)
 
-    def confirm_delete_site(self, site, list_name, row):
+    def confirm_delete_site(self, site, list_name, sites_list, table):
         confirmation = QMessageBox.question(
-            self, "Confirm Delete", f"Are you sure you want to remove {site} from {list_name}?",
+            self, "Confirm Delete", 
+            f"Are you sure you want to remove {site} from {list_name}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirmation == QMessageBox.StandardButton.Yes:
-            if list_name == "Blocked Sites":
-                self.blocked_sites.remove(site)
-                self.populate_blocked_table()
-            elif list_name == "Excluded Sites":
-                self.excluded_sites.remove(site)
-                self.populate_excluded_table()
-
-            self.save_blocked_sites()
+            sites_list.remove(site)
+            table.populate(sites_list)
+            self.save_data()
             self.restart_mitmproxy()
 
     def add_category(self):
@@ -287,25 +256,28 @@ class DashboardWindow(QMainWindow):
             if ok:
                 keywords_list = [kw.strip() for kw in keywords.split(',') if kw.strip()]
                 self.category_keywords[category_name] = keywords_list
-                self.save_blocked_sites()
-                self.populate_categories_table()
+                self.save_data()
+                self.categories_table.populate(self.category_keywords)
                 self.restart_mitmproxy()
 
     def delete_category(self):
-        selected_row = self.categories_table.currentRow()
-        if selected_row != -1:
-            category_item = self.categories_table.item(selected_row, 0)
-            if category_item:
-                category_name = category_item.text()
-                confirmation = QMessageBox.question(
-                    self, "Confirm Delete", f"Are you sure you want to delete category '{category_name}'?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if confirmation == QMessageBox.StandardButton.Yes:
-                    del self.category_keywords[category_name]
-                    self.save_blocked_sites()
-                    self.populate_categories_table()
-                    self.restart_mitmproxy()
+        if self.categories_table.currentRow() == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a category to delete.")
+            return
+            
+        category_item = self.categories_table.item(self.categories_table.currentRow(), 0)
+        if category_item:
+            category_name = category_item.text()
+            confirmation = QMessageBox.question(
+                self, "Confirm Delete", 
+                f"Are you sure you want to delete category '{category_name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if confirmation == QMessageBox.StandardButton.Yes:
+                del self.category_keywords[category_name]
+                self.save_data()
+                self.categories_table.populate(self.category_keywords)
+                self.restart_mitmproxy()
 
     def restart_mitmproxy(self):
         subprocess.call(["taskkill", "/F", "/IM", "mitmdump.exe"])
@@ -316,10 +288,9 @@ class DashboardWindow(QMainWindow):
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-
         if confirmation == QMessageBox.StandardButton.Yes:
             disable_windows_proxy()
-            self.save_blocked_sites()
+            self.save_data()
             event.accept()
         else:
             event.ignore()
@@ -331,10 +302,8 @@ if __name__ == '__main__':
     launch_proxy()
     app = QApplication(sys.argv)
     
-    # Show login dialog first
     login_dialog = LoginDialog()
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
-        # Only show main window if login was successful
         window = DashboardWindow()
         window.show()
         sys.exit(app.exec())
