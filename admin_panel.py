@@ -1,7 +1,11 @@
 import json
+import os
+from dotenv import load_dotenv
+import psycopg2
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, QInputDialog, QTabWidget
+    QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
+    QInputDialog, QTabWidget, QLabel
 )
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
@@ -24,6 +28,66 @@ class AddSiteDialog(QDialog):
 
     def get_input(self):
         return self.site_input.text()
+
+
+class LoginDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Login')
+        self.setModal(True)
+        self.setMinimumWidth(300)
+        
+        layout = QFormLayout()
+        
+        # Username input
+        self.username_input = QLineEdit()
+        layout.addRow('Username:', self.username_input)
+        
+        # Password input
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow('Password:', self.password_input)
+        
+        # Login button
+        login_button = QPushButton('Login')
+        login_button.clicked.connect(self.try_login)
+        layout.addRow(login_button)
+        
+        self.setLayout(layout)
+        
+        # Load database configuration
+        load_dotenv()
+        self.db_config = {
+            'dbname': os.getenv('DB_NAME'),
+            'user': os.getenv('DB_USER'),
+            'password': os.getenv('DB_PASSWORD'),
+            'host': os.getenv('DB_HOST')
+        }
+        
+    def try_login(self):
+        username = self.username_input.text()
+        password = self.password_input.text()
+        
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+            
+            # Check if user exists and password matches
+            cur.execute(
+                "SELECT * FROM users WHERE username = %s AND password = %s",
+                (username, password)
+            )
+            
+            if cur.fetchone():
+                self.accept()
+            else:
+                QMessageBox.warning(self, 'Login Failed', 'Invalid username or password')
+            
+            cur.close()
+            conn.close()
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Database Error', f'Could not connect to database: {str(e)}')
 
 
 class DashboardWindow(QMainWindow):
@@ -244,8 +308,8 @@ class DashboardWindow(QMainWindow):
                     self.restart_mitmproxy()
 
     def restart_mitmproxy(self):
-        subprocess.call(["taskkill", "/F", "/IM", "mitmproxy.exe"])
-        subprocess.Popen(['mitmproxy', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
+        subprocess.call(["taskkill", "/F", "/IM", "mitmdump.exe"])
+        subprocess.Popen(['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
 
     def closeEvent(self, event):
         confirmation = QMessageBox.question(
@@ -264,9 +328,13 @@ class DashboardWindow(QMainWindow):
 if __name__ == '__main__':
     import sys
     from PyQt6.QtWidgets import QApplication
-
     launch_proxy()
     app = QApplication(sys.argv)
-    window = DashboardWindow()
-    window.show()
-    sys.exit(app.exec())
+    
+    # Show login dialog first
+    login_dialog = LoginDialog()
+    if login_dialog.exec() == QDialog.DialogCode.Accepted:
+        # Only show main window if login was successful
+        window = DashboardWindow()
+        window.show()
+        sys.exit(app.exec())
