@@ -130,19 +130,34 @@ class LoginDialog(BaseDialog):
             self.current_user_id = user_id  # Store the user ID
             
             if is_2fa_enabled:
-                # Generate and save 2FA code
-                code = self.generate_2fa_code()
-                self.save_2fa_code(cur, user_id, code)
-                conn.commit()
+                # Check if there's an active code
+                cur.execute(
+                    """
+                    SELECT code FROM two_factor_codes 
+                    WHERE user_id = %s AND expiry > NOW()
+                    ORDER BY expiry DESC LIMIT 1
+                    """,
+                    (user_id,)
+                )
+                existing_code = cur.fetchone()
                 
-                # Send code via email
-                if not send_2fa_code(email, code):
-                    QMessageBox.critical(self, 'Email Error', 'Failed to send 2FA code')
-                    return
-                
+                if not existing_code:
+                    # No valid code exists, generate and send new one
+                    code = self.generate_2fa_code()
+                    self.save_2fa_code(cur, user_id, code)
+                    conn.commit()
+                    
+                    # Send code via email
+                    if not send_2fa_code(email, code):
+                        QMessageBox.critical(self, 'Email Error', 'Failed to send 2FA code')
+                        return
+
                 # Show 2FA verification dialog
-                two_factor_dialog = TwoFactorDialog(self)
-                if two_factor_dialog.exec():
+                while True:  # Loop for multiple attempts
+                    two_factor_dialog = TwoFactorDialog(self)
+                    if not two_factor_dialog.exec():  # User cancelled
+                        return
+                        
                     entered_code = two_factor_dialog.get_code()
                     if self.verify_2fa_code(cur, user_id, entered_code):
                         # Delete the used code
@@ -152,8 +167,9 @@ class LoginDialog(BaseDialog):
                         )
                         conn.commit()
                         self.accept()
+                        break  # Exit the loop on successful verification
                     else:
-                        QMessageBox.warning(self, 'Verification Failed', 'Invalid or expired 2FA code')
+                        QMessageBox.information(self, 'Verification Failed', 'Incorrect code. Please try again.')
             else:
                 self.accept()
             
