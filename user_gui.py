@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget, QTabWidget, QApplication, QMessageBox,
     QPushButton, QLineEdit, QLabel, QHBoxLayout, QFormLayout
 )
+from PyQt6.QtCore import QTimer
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 
 
@@ -32,7 +33,13 @@ class UserDashboardWindow(QMainWindow):
         self.blocked_sites_file = 'blocked_sites.json'
         self.blocked_sites, self.excluded_sites = self.load_data()
         self.server_url = "http://192.168.0.103:8000"  # Default server URL
-        self.api_key = ""  # Will be set by user
+        self.api_key = "123"  # Set your API key here
+        
+        # Setup heartbeat timer
+        self.heartbeat_timer = QTimer()
+        self.heartbeat_timer.timeout.connect(self.send_heartbeat)
+        self.heartbeat_timer.start(3000)  # Start timer immediately with 3 second interval
+        
         self.setup_ui()
 
     def setup_ui(self):
@@ -68,11 +75,17 @@ class UserDashboardWindow(QMainWindow):
         settings_layout = QFormLayout()
         
         self.server_url_input = QLineEdit(self.server_url)
+        self.server_url_input.textChanged.connect(self.on_server_settings_changed)
         settings_layout.addRow("Server URL:", self.server_url_input)
         
         self.api_key_input = QLineEdit(self.api_key)
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_input.textChanged.connect(self.on_server_settings_changed)
         settings_layout.addRow("API Key:", self.api_key_input)
+        
+        # Add connection status label
+        self.connection_status = QLabel("Not Connected")
+        settings_layout.addRow("Status:", self.connection_status)
         
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -92,8 +105,30 @@ class UserDashboardWindow(QMainWindow):
         script_group.setLayout(script_layout)
         layout.addWidget(script_group)
 
+        # Send initial heartbeat
+        self.send_heartbeat()
+
         container.setLayout(layout)
         return container
+
+    def on_server_settings_changed(self):
+        # Update stored values
+        new_url = self.server_url_input.text().strip()
+        new_key = self.api_key_input.text().strip()
+        
+        # Only update if both fields are filled
+        if new_url and new_key:
+            self.server_url = new_url
+            self.api_key = new_key
+            
+            # Start heartbeat if not already running
+            if not self.heartbeat_timer.isActive():
+                self.heartbeat_timer.start(3000)
+                self.send_heartbeat()  # Send first heartbeat immediately
+        else:
+            # Stop heartbeat if either field is empty
+            self.heartbeat_timer.stop()
+            self.connection_status.setText("Not Connected")
 
     def load_data(self):
         try:
@@ -104,20 +139,16 @@ class UserDashboardWindow(QMainWindow):
             return [], []
 
     def execute_script(self):
-        server_url = self.server_url_input.text().strip()
-        api_key = self.api_key_input.text().strip()
-        script_name = self.script_name_input.text().strip()
-
-        if not all([server_url, api_key, script_name]):
+        if not all([self.server_url_input.text().strip(), self.api_key_input.text().strip(), self.script_name_input.text().strip()]):
             QMessageBox.warning(self, "Input Error", "Please fill in all fields")
             return
 
         try:
-            headers = {"Authorization": f"Bearer {api_key}"}
-            payload = {"script": script_name}
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            payload = {"script": self.script_name_input.text().strip()}
             
             response = requests.post(
-                f"{server_url}/api/execute/",
+                f"{self.server_url}/api/execute/",
                 data=payload,
                 headers=headers
             )
@@ -130,7 +161,36 @@ class UserDashboardWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {e}")
 
+    def send_heartbeat(self):
+        if not self.api_key:  # Skip if API key is not set
+            self.connection_status.setText("Not Connected")
+            return
+            
+        try:
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {self.api_key}'
+            }
+            response = requests.post(
+                f"{self.server_url}/heartbeat/", 
+                json={'user_id': self.api_key},
+                headers=headers,
+                timeout=5
+            )
+            if response.status_code == 200:
+                self.connection_status.setText("Connected")
+            else:
+                self.connection_status.setText(f"Error: {response.status_code}")
+                print(f"Failed to send heartbeat: {response.text}")
+                if response.status_code in [400, 401]:  # Bad request or unauthorized
+                    self.heartbeat_timer.stop()
+        except Exception as e:
+            self.connection_status.setText("Connection Failed")
+            print(f"Error sending heartbeat: {str(e)}")
+
     def closeEvent(self, event):
+        # Stop the heartbeat timer when closing the window
+        self.heartbeat_timer.stop()
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No

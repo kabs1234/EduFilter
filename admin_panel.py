@@ -7,12 +7,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
     QInputDialog, QTabWidget, QLabel, QCheckBox
 )
+from PyQt6.QtCore import QTimer
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
 import random
 import string
 from datetime import datetime, timedelta
 from email_utils import send_2fa_code
+import requests
 
 
 class BaseDialog(QDialog):
@@ -229,6 +231,11 @@ class DashboardWindow(QMainWindow):
             'host': os.getenv('DB_HOST')
         }
         
+        # Setup online users refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_online_users)
+        self.refresh_timer.start(3000)  # Refresh every 3 seconds
+        
         self.setup_ui()
 
     def setup_ui(self):
@@ -237,6 +244,7 @@ class DashboardWindow(QMainWindow):
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
         self.tab_widget.addTab(self.create_categories_tab(), "Categories")
         self.tab_widget.addTab(self.create_settings_tab(), "Settings")
+        self.tab_widget.addTab(self.create_online_users_tab(), "Online Users")
         self.setCentralWidget(self.tab_widget)
 
     def create_blocked_sites_tab(self):
@@ -295,6 +303,24 @@ class DashboardWindow(QMainWindow):
         container.setLayout(layout)
         return container
 
+    def create_online_users_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        # Create table for online users
+        self.online_users_table = QTableWidget()
+        self.online_users_table.setColumnCount(2)
+        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Last Active'])
+        layout.addWidget(self.online_users_table)
+        
+        # Add refresh button
+        refresh_button = QPushButton("Refresh Now")
+        refresh_button.clicked.connect(self.refresh_online_users)
+        layout.addWidget(refresh_button)
+        
+        widget.setLayout(layout)
+        return widget
+        
     def create_tab_layout(self, table_widget, buttons):
         layout = QVBoxLayout()
         layout.addWidget(table_widget)
@@ -497,7 +523,24 @@ class DashboardWindow(QMainWindow):
             print(f"Error saving settings: {str(e)}")  # Debug log
             QMessageBox.critical(self, 'Database Error', f'Could not save settings: {str(e)}')
 
+    def refresh_online_users(self):
+        try:
+            response = requests.get("http://192.168.0.103:8000/online-users/", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                self.online_users_table.setRowCount(0)
+                for user in data['online_users']:
+                    row = self.online_users_table.rowCount()
+                    self.online_users_table.insertRow(row)
+                    self.online_users_table.setItem(row, 0, QTableWidgetItem(str(user['user_id'])))
+                    last_active = datetime.fromisoformat(user['last_heartbeat'].replace('Z', '+00:00'))
+                    self.online_users_table.setItem(row, 1, QTableWidgetItem(last_active.strftime('%Y-%m-%d %H:%M:%S')))
+        except Exception as e:
+            print(f"Error refreshing online users: {str(e)}")
+
     def closeEvent(self, event):
+        # Stop the refresh timer when closing the window
+        self.refresh_timer.stop()
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
