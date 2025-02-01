@@ -5,7 +5,7 @@ import psycopg2
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
-    QInputDialog, QTabWidget, QLabel, QCheckBox
+    QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView
 )
 from PyQt6.QtCore import QTimer
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
@@ -308,7 +308,7 @@ class DashboardWindow(QMainWindow):
         self.online_users_table = QTableWidget()
         self.online_users_table.setColumnCount(2)
         self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Last Active'])
-        self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         # Add refresh button
         refresh_button = QPushButton("Refresh Online Users")
