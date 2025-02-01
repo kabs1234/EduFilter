@@ -231,10 +231,7 @@ class DashboardWindow(QMainWindow):
             'host': os.getenv('DB_HOST')
         }
         
-        # Setup online users refresh timer
-        self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self.refresh_online_users)
-        self.refresh_timer.start(3000)  # Refresh every 3 seconds
+        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')  # Get server URL from env with fallback
         
         self.setup_ui()
 
@@ -304,22 +301,23 @@ class DashboardWindow(QMainWindow):
         return container
 
     def create_online_users_tab(self):
-        widget = QWidget()
+        container = QWidget()
         layout = QVBoxLayout()
-        
+
         # Create table for online users
         self.online_users_table = QTableWidget()
         self.online_users_table.setColumnCount(2)
         self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Last Active'])
-        layout.addWidget(self.online_users_table)
-        
+        self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
         # Add refresh button
-        refresh_button = QPushButton("Refresh Now")
+        refresh_button = QPushButton("Refresh Online Users")
         refresh_button.clicked.connect(self.refresh_online_users)
         layout.addWidget(refresh_button)
         
-        widget.setLayout(layout)
-        return widget
+        layout.addWidget(self.online_users_table)
+        container.setLayout(layout)
+        return container
         
     def create_tab_layout(self, table_widget, buttons):
         layout = QVBoxLayout()
@@ -525,7 +523,7 @@ class DashboardWindow(QMainWindow):
 
     def refresh_online_users(self):
         try:
-            response = requests.get("http://192.168.0.103:8000/online-users/", timeout=5)
+            response = requests.get(f"{self.server_url}/online-users/", timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 self.online_users_table.setRowCount(0)
@@ -540,7 +538,6 @@ class DashboardWindow(QMainWindow):
 
     def closeEvent(self, event):
         # Stop the refresh timer when closing the window
-        self.refresh_timer.stop()
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No

@@ -12,9 +12,12 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS_DIR = os.path.join(BASE_DIR, 'scripts') 
 
@@ -23,12 +26,15 @@ SCRIPTS_DIR = os.path.join(BASE_DIR, 'scripts')
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-ak493q9$!=1_jg71rse!@6cut%rje042o_wgr%9!!bh#0slqat'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-ak493q9$!=1_jg71rse!@6cut%rje042o_wgr%9!!bh#0slqat')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['192.168.0.103', 'localhost', '127.0.0.1']
+# Get server URL and parse it for ALLOWED_HOSTS
+server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
+server_host = server_url.split('://')[1].split(':')[0]
+ALLOWED_HOSTS = [server_host, 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -80,8 +86,12 @@ WSGI_APPLICATION = 'script_server.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),  # Fix here
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 

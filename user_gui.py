@@ -1,4 +1,5 @@
 import json
+import os
 import requests
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
@@ -6,8 +7,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QHBoxLayout, QFormLayout
 )
 from PyQt6.QtCore import QTimer
+from dotenv import load_dotenv
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 
+# Load environment variables
+load_dotenv()
 
 class SiteTable(QTableWidget):
     def __init__(self, header_label):
@@ -32,13 +36,8 @@ class UserDashboardWindow(QMainWindow):
         self.setWindowTitle('Content Monitoring - User Mode')
         self.blocked_sites_file = 'blocked_sites.json'
         self.blocked_sites, self.excluded_sites = self.load_data()
-        self.server_url = "http://192.168.0.103:8000"  # Default server URL
-        self.api_key = "123"  # Set your API key here
-        
-        # Setup heartbeat timer
-        self.heartbeat_timer = QTimer()
-        self.heartbeat_timer.timeout.connect(self.send_heartbeat)
-        self.heartbeat_timer.start(3000)  # Start timer immediately with 3 second interval
+        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')  # Get server URL from env with fallback
+        self.api_key = os.getenv('DEFAULT_API_KEY', '123')  # Get default API key from env with fallback
         
         self.setup_ui()
 
@@ -112,22 +111,14 @@ class UserDashboardWindow(QMainWindow):
         return container
 
     def on_server_settings_changed(self):
-        # Update stored values
         new_url = self.server_url_input.text().strip()
         new_key = self.api_key_input.text().strip()
         
-        # Only update if both fields are filled
         if new_url and new_key:
             self.server_url = new_url
             self.api_key = new_key
-            
-            # Start heartbeat if not already running
-            if not self.heartbeat_timer.isActive():
-                self.heartbeat_timer.start(3000)
-                self.send_heartbeat()  # Send first heartbeat immediately
+            self.send_heartbeat()  # Send heartbeat when settings change
         else:
-            # Stop heartbeat if either field is empty
-            self.heartbeat_timer.stop()
             self.connection_status.setText("Not Connected")
 
     def load_data(self):
@@ -183,14 +174,12 @@ class UserDashboardWindow(QMainWindow):
                 self.connection_status.setText(f"Error: {response.status_code}")
                 print(f"Failed to send heartbeat: {response.text}")
                 if response.status_code in [400, 401]:  # Bad request or unauthorized
-                    self.heartbeat_timer.stop()
+                    pass
         except Exception as e:
             self.connection_status.setText("Connection Failed")
             print(f"Error sending heartbeat: {str(e)}")
 
     def closeEvent(self, event):
-        # Stop the heartbeat timer when closing the window
-        self.heartbeat_timer.stop()
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
