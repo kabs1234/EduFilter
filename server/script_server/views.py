@@ -1,8 +1,79 @@
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
-from .models import UserStatus
+from .models import UserStatus, UserIP
 import json
+
+@csrf_exempt
+def register_ip(request):
+    if request.method == 'POST':
+        try:
+            # Get authorization header
+            auth_header = request.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                return JsonResponse({'status': 'error', 'message': 'Invalid authorization header'}, status=401)
+            
+            # Extract token
+            token = auth_header.split(' ')[1]
+            
+            # Parse request body
+            data = json.loads(request.body)
+            user_id = data.get('user_id')
+            ip_address = data.get('ip_address')
+            port = data.get('port', 8081)
+            
+            # Validate token matches user_id
+            if not token or token != user_id:
+                return JsonResponse({'status': 'error', 'message': 'Invalid credentials'}, status=401)
+            
+            # Update or create user IP
+            UserIP.objects.update_or_create(
+                user_id=user_id,
+                defaults={'ip_address': ip_address, 'port': port}
+            )
+            return JsonResponse({'status': 'success'})
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    
+    return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=405)
+
+def get_user_ips(request):
+    user_ips = UserIP.objects.all().values('user_id', 'ip_address', 'port', 'last_updated')
+    return JsonResponse({'user_ips': list(user_ips)})
+
+@csrf_exempt
+def delete_ip(request):
+    if request.method == 'POST':
+        try:
+            # Get authorization header
+            auth_header = request.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                return JsonResponse({'status': 'error', 'message': 'Invalid authorization header'}, status=401)
+            
+            # Extract token
+            token = auth_header.split(' ')[1]
+            
+            # Parse request body
+            data = json.loads(request.body)
+            user_id = data.get('user_id')
+            
+            # Validate token matches user_id
+            if not token or token != user_id:
+                return JsonResponse({'status': 'error', 'message': 'Invalid credentials'}, status=401)
+            
+            # Delete user IP
+            UserIP.objects.filter(user_id=user_id).delete()
+            return JsonResponse({'status': 'success'})
+            
+        except json.JSONDecodeError:
+            return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    
+    return JsonResponse({'status': 'error', 'message': 'Invalid request method'}, status=405)
 
 @csrf_exempt
 def heartbeat(request):

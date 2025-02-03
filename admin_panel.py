@@ -5,7 +5,7 @@ import psycopg2
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
-    QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView
+    QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView, QHBoxLayout
 )
 from PyQt6.QtCore import QTimer
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
@@ -306,19 +306,22 @@ class DashboardWindow(QMainWindow):
 
         # Create table for online users
         self.online_users_table = QTableWidget()
-        self.online_users_table.setColumnCount(2)
-        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Last Active'])
+        self.online_users_table.setColumnCount(3)  # Added IP:Port column
+        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Status', 'Address'])
         self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.online_users_table)
 
-        # Add refresh button
-        refresh_button = QPushButton("Refresh Online Users")
+        # Refresh button
+        refresh_button = QPushButton("Refresh Users")
         refresh_button.clicked.connect(self.refresh_online_users)
         layout.addWidget(refresh_button)
-        
-        layout.addWidget(self.online_users_table)
+
+        # Initial refresh
+        self.refresh_online_users()
+
         container.setLayout(layout)
         return container
-        
+
     def create_tab_layout(self, table_widget, buttons):
         layout = QVBoxLayout()
         layout.addWidget(table_widget)
@@ -523,18 +526,34 @@ class DashboardWindow(QMainWindow):
 
     def refresh_online_users(self):
         try:
-            response = requests.get(f"{self.server_url}/online-users/", timeout=5)
+            # Get registered users and their IPs
+            response = requests.get(f"{self.server_url}/user-ips/", timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 self.online_users_table.setRowCount(0)
-                for user in data['online_users']:
+                for user in data['user_ips']:
                     row = self.online_users_table.rowCount()
                     self.online_users_table.insertRow(row)
                     self.online_users_table.setItem(row, 0, QTableWidgetItem(str(user['user_id'])))
-                    last_active = datetime.fromisoformat(user['last_heartbeat'].replace('Z', '+00:00'))
-                    self.online_users_table.setItem(row, 1, QTableWidgetItem(last_active.strftime('%Y-%m-%d %H:%M:%S')))
+                    
+                    # Check if user is online
+                    address = f"{user['ip_address']}:{user['port']}"
+                    is_online, status = self.check_user_status(address, user['user_id'])
+                    self.online_users_table.setItem(row, 1, QTableWidgetItem("Online" if is_online else "Offline"))
+                    self.online_users_table.setItem(row, 2, QTableWidgetItem(address))
         except Exception as e:
-            print(f"Error refreshing online users: {str(e)}")
+            print(f"Error refreshing users: {str(e)}")
+
+    def check_user_status(self, address, user_id):
+        try:
+            response = requests.get(f"http://{address}/status", timeout=2)
+            if response.status_code == 200:
+                data = response.json()
+                if str(data.get('user_id')) == str(user_id):  # Verify user_id matches
+                    return True, "Online"
+            return False, "Offline"
+        except:
+            return False, "Offline"
 
     def closeEvent(self, event):
         # Stop the refresh timer when closing the window
