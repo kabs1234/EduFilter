@@ -306,8 +306,8 @@ class DashboardWindow(QMainWindow):
 
         # Create table for online users
         self.online_users_table = QTableWidget()
-        self.online_users_table.setColumnCount(3)  # Added IP:Port column
-        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Status', 'Address'])
+        self.online_users_table.setColumnCount(2)  
+        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Address'])
         self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.online_users_table)
 
@@ -536,11 +536,9 @@ class DashboardWindow(QMainWindow):
                     self.online_users_table.insertRow(row)
                     self.online_users_table.setItem(row, 0, QTableWidgetItem(str(user['user_id'])))
                     
-                    # Check if user is online
+                    # Set address
                     address = f"{user['ip_address']}:{user['port']}"
-                    is_online, status = self.check_user_status(address, user['user_id'])
-                    self.online_users_table.setItem(row, 1, QTableWidgetItem("Online" if is_online else "Offline"))
-                    self.online_users_table.setItem(row, 2, QTableWidgetItem(address))
+                    self.online_users_table.setItem(row, 1, QTableWidgetItem(address))
         except Exception as e:
             print(f"Error refreshing users: {str(e)}")
 
