@@ -5,9 +5,13 @@ from django.contrib import admin
 from django.urls import include, path
 from . import views
 
+script_executor_patterns = [
+    path('user-settings/', views.user_settings, name='user_settings'),
+]
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('script_executor.urls')),
+    path('api/', include(script_executor_patterns)),
     path('heartbeat/', views.heartbeat, name='heartbeat'),
     path('online-users/', views.get_online_users, name='online_users'),
     path('register-ip/', views.register_ip, name='register_ip'),

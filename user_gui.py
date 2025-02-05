@@ -67,9 +67,8 @@ class UserDashboardWindow(QMainWindow):
         self.setWindowTitle('Content Monitoring - User Mode')
         self.blocked_sites_file = 'blocked_sites.json'
         self.user_id = self.get_or_create_user_id()
-        self.blocked_sites, self.excluded_sites = self.load_data()
-        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
-        self.api_key = self.user_id  # Use user_id as api_key
+        self.api_key = self.user_id  # Set api_key before loading data
+        self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
         
         # Start status server
         self.local_ip = get_local_ip()
@@ -78,6 +77,9 @@ class UserDashboardWindow(QMainWindow):
         
         # Register IP with main server
         self.register_ip_with_server()
+        
+        # Load data after api_key is set
+        self.blocked_sites, self.excluded_sites = self.load_data()
         
         self.setup_ui()
 
@@ -222,11 +224,46 @@ class UserDashboardWindow(QMainWindow):
             self.connection_status.setText("Not Connected")
 
     def load_data(self):
+        """Fetch user settings from the server or use defaults."""
         try:
-            with open(self.blocked_sites_file, 'r') as file:
-                data = json.load(file)
-                return data.get("sites", []), data.get("excluded_sites", [])
-        except (FileNotFoundError, json.JSONDecodeError):
+            print("\nAttempting to fetch user settings...")
+            print(f"User ID: {self.user_id}")
+            print(f"API Key: {self.api_key}")
+            print(f"Server URL: {self.server_url}")
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {self.api_key}'
+            }
+            print(f"Request headers: {headers}")
+            
+            url = f"{self.server_url}/api/user-settings/"
+            print(f"Request URL: {url}")
+            
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=5,
+                verify=False  # Add this to handle self-signed certificates
+            )
+            
+            print(f"Response status code: {response.status_code}")
+            print(f"Response content: {response.text}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Parsed response data: {data}")
+                return data.get("blocked_sites", []), data.get("excluded_sites", [])
+            else:
+                print(f"Failed to fetch settings. Status code: {response.status_code}")
+                print(f"Error message: {response.text}")
+                return [], []
+                
+        except Exception as e:
+            print(f"Exception while fetching settings: {str(e)}")
+            print(f"Exception type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return [], []
 
     def execute_script(self):
