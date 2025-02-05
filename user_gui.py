@@ -1,6 +1,7 @@
 import json
 import os
 import requests
+import uuid
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QTabWidget, QApplication, QMessageBox,
@@ -65,19 +66,62 @@ class UserDashboardWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle('Content Monitoring - User Mode')
         self.blocked_sites_file = 'blocked_sites.json'
+        self.user_id = self.get_or_create_user_id()
         self.blocked_sites, self.excluded_sites = self.load_data()
-        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')  # Get server URL from env with fallback
-        self.api_key = os.getenv('DEFAULT_API_KEY', '123')  # Get default API key from env with fallback
+        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
+        self.api_key = self.user_id  # Use user_id as api_key
         
         # Start status server
         self.local_ip = get_local_ip()
-        self.status_port = 8081  # You can change this port if needed
+        self.status_port = 8081
         self.start_status_server()
         
         # Register IP with main server
         self.register_ip_with_server()
         
         self.setup_ui()
+
+    def get_or_create_user_id(self):
+        """Get existing user ID from .env file or create a new one."""
+        env_path = '.env'
+        user_id = None
+
+        # Try to read existing user ID from .env
+        if os.path.exists(env_path):
+            load_dotenv()
+            user_id = os.getenv('USER_ID')
+
+        # If no user ID exists, create a new one
+        if not user_id:
+            user_id = str(uuid.uuid4())
+            
+            # Read existing .env content
+            env_content = ''
+            if os.path.exists(env_path):
+                with open(env_path, 'r') as f:
+                    env_content = f.read()
+
+            # Add or update USER_ID in .env
+            if 'USER_ID=' in env_content:
+                lines = env_content.splitlines()
+                new_lines = []
+                for line in lines:
+                    if line.startswith('USER_ID='):
+                        new_lines.append(f'USER_ID={user_id}')
+                    else:
+                        new_lines.append(line)
+                env_content = '\n'.join(new_lines)
+            else:
+                env_content += f'\nUSER_ID={user_id}'
+
+            # Write back to .env
+            with open(env_path, 'w') as f:
+                f.write(env_content)
+
+            # Reload environment variables
+            load_dotenv()
+
+        return user_id
 
     def start_status_server(self):
         try:
