@@ -42,20 +42,74 @@ class UserSettings(models.Model):
         return f"Settings for user {self.user_id}"
 
     @classmethod
+    def create_user_settings(cls, user_id, default_settings=None):
+        """
+        Create new user settings with default values.
+        If default_settings is not provided, use system defaults.
+        """
+        if default_settings is None:
+            default_settings = {
+                'blocked_sites': [
+                    'web.telegram.org',
+                    'example.com'
+                ],
+                'excluded_sites': [
+                    'facebook.com',
+                    'twitter.com'
+                ],
+                'categories': {
+                    'explicit_language_and_profanity': [
+                        'curse', 'swear', 'offensive', 'slurs', 'profanity'
+                    ],
+                    'violence_and_gore': [
+                        'violence', 'gore', 'graphic', 'brutal'
+                    ],
+                    'hate_speech_and_discrimination': [
+                        'racist', 'sexist', 'homophobic', 'extremist', 'hate'
+                    ],
+                    'illegal_activities': [
+                        'drugs', 'hacking', 'weapons', 'illegal'
+                    ],
+                    'bullying_and_harassment': [
+                        'bullying', 'harassment', 'harmful'
+                    ],
+                    'dangerous_or_risky_behavior': [
+                        'self-harm', 'stunts', 'dangerous', 'risky'
+                    ],
+                    'explicit_religious_or_political_propaganda': [
+                        'religious', 'political', 'extreme', 'divisive'
+                    ],
+                    'addictive_or_distracting_content': [
+                        'addictive', 'games', 'social media', 'distracting'
+                    ],
+                    'gambling_and_betting': [
+                        'betting', 'gambling', 'casino', 'lottery'
+                    ]
+                }
+            }
+        
+        try:
+            settings = cls.objects.create(
+                user_id=user_id,
+                blocked_sites=default_settings.get('blocked_sites', []),
+                excluded_sites=default_settings.get('excluded_sites', []),
+                categories=default_settings.get('categories', {})
+            )
+            return settings
+        except Exception as e:
+            print(f"Error creating user settings: {str(e)}")
+            return None
+
+    @classmethod
     def get_user_settings(cls, user_id):
         """
         Fetch user settings or create with defaults if not exists.
         """
-        default_settings = {
-            'blocked_sites': [],
-            'excluded_sites': [],
-            'categories': {}
-        }
-        settings, created = cls.objects.get_or_create(
-            user_id=user_id,
-            defaults=default_settings
-        )
-        return settings
+        try:
+            settings = cls.objects.get(user_id=user_id)
+            return settings
+        except cls.DoesNotExist:
+            return cls.create_user_settings(user_id)
 
     def get_blocked_sites(self):
         """Get blocked sites as a Python list."""
