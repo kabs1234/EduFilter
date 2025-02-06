@@ -13,9 +13,13 @@ from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import socket
+import logging
 
 # Load environment variables
 load_dotenv()
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 def get_local_ip():
     try:
@@ -69,6 +73,9 @@ class UserDashboardWindow(QMainWindow):
         self.user_id = self.get_or_create_user_id()
         self.api_key = self.user_id  # Set api_key before loading data
         self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
+        
+        # Initialize connection status label
+        self.connection_status = QLabel("Not Connected")
         
         # Start status server
         self.local_ip = get_local_ip()
@@ -132,9 +139,7 @@ class UserDashboardWindow(QMainWindow):
             self.status_server = server
             server_thread = threading.Thread(target=server.serve_forever, daemon=True)
             server_thread.start()
-            print(f"Status server started at http://{self.local_ip}:{self.status_port}")
         except Exception as e:
-            print(f"Failed to start status server: {e}")
             # Try with localhost if binding to local_ip fails
             try:
                 server = HTTPServer(("127.0.0.1", self.status_port), StatusHandler)
@@ -143,9 +148,8 @@ class UserDashboardWindow(QMainWindow):
                 server_thread = threading.Thread(target=server.serve_forever, daemon=True)
                 server_thread.start()
                 self.local_ip = "127.0.0.1"
-                print(f"Status server started at http://127.0.0.1:{self.status_port}")
-            except Exception as e:
-                print(f"Failed to start status server on localhost: {e}")
+            except Exception:
+                pass  # Silently handle server start failure
 
     def setup_ui(self):
         self.tab_widget = QTabWidget()
@@ -189,7 +193,6 @@ class UserDashboardWindow(QMainWindow):
         settings_layout.addRow("API Key:", self.api_key_input)
         
         # Add connection status label
-        self.connection_status = QLabel("Not Connected")
         settings_layout.addRow("Status:", self.connection_status)
         
         settings_group.setLayout(settings_layout)
@@ -226,19 +229,12 @@ class UserDashboardWindow(QMainWindow):
     def load_data(self):
         """Fetch user settings from the server or use defaults."""
         try:
-            print("\nAttempting to fetch user settings...")
-            print(f"User ID: {self.user_id}")
-            print(f"API Key: {self.api_key}")
-            print(f"Server URL: {self.server_url}")
-            
             headers = {
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {self.api_key}'
             }
-            print(f"Request headers: {headers}")
             
             url = f"{self.server_url}/api/user-settings/"
-            print(f"Request URL: {url}")
             
             response = requests.get(
                 url,
@@ -247,23 +243,16 @@ class UserDashboardWindow(QMainWindow):
                 verify=False  # Add this to handle self-signed certificates
             )
             
-            print(f"Response status code: {response.status_code}")
-            print(f"Response content: {response.text}")
-            
             if response.status_code == 200:
                 data = response.json()
-                print(f"Parsed response data: {data}")
-                return data.get("blocked_sites", []), data.get("excluded_sites", [])
+                blocked_sites = data.get('blocked_sites', [])
+                excluded_sites = data.get('excluded_sites', [])
+                return blocked_sites, excluded_sites
             else:
-                print(f"Failed to fetch settings. Status code: {response.status_code}")
-                print(f"Error message: {response.text}")
                 return [], []
                 
         except Exception as e:
-            print(f"Exception while fetching settings: {str(e)}")
-            print(f"Exception type: {type(e)}")
             import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             return [], []
 
     def execute_script(self):
@@ -300,18 +289,21 @@ class UserDashboardWindow(QMainWindow):
                 'ip_address': self.local_ip,
                 'port': self.status_port
             }
+            
             response = requests.post(
-                f"{self.server_url}/register-ip/",
+                f"{self.server_url}/api/register-ip/",
                 json=data,
                 headers=headers,
-                timeout=5
+                verify=False  # Add this to handle self-signed certificates
             )
+            
             if response.status_code == 200:
-                print(f"Successfully registered IP {self.local_ip}:{self.status_port}")
+                self.connection_status.setText("Connected")
             else:
-                print(f"Failed to register IP: {response.text}")
-        except Exception as e:
-            print(f"Error registering IP: {str(e)}")
+                self.connection_status.setText("Failed to register")
+                
+        except Exception:
+            self.connection_status.setText("Connection Error")
 
     def unregister_ip(self):
         try:
@@ -319,21 +311,22 @@ class UserDashboardWindow(QMainWindow):
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {self.api_key}'
             }
-            data = {
-                'user_id': self.api_key
-            }
+            data = {'user_id': self.api_key}
+            
             response = requests.post(
-                f"{self.server_url}/delete-ip/",
+                f"{self.server_url}/api/delete-ip/",
                 json=data,
                 headers=headers,
-                timeout=5
+                verify=False  # Add this to handle self-signed certificates
             )
+            
             if response.status_code == 200:
-                print(f"Successfully unregistered IP {self.local_ip}:{self.status_port}")
+                self.connection_status.setText("Disconnected")
             else:
-                print(f"Failed to unregister IP: {response.text}")
-        except Exception as e:
-            print(f"Error unregistering IP: {str(e)}")
+                self.connection_status.setText("Failed to unregister")
+                
+        except Exception:
+            self.connection_status.setText("Connection Error")
 
     def closeEvent(self, event):
         confirmation = QMessageBox.question(

@@ -29,7 +29,10 @@ class BlockSites:
         return re.compile("|".join(rf"\b{re.escape(keyword)}\b" for keyword in keywords), re.IGNORECASE)
 
     def is_excluded(self, host):
-        return any(excluded in host for excluded in self.excluded_sites)
+        # Check if it's the user settings API endpoint
+        if '/api/user-settings/' in host or any(excluded in host for excluded in self.excluded_sites):
+            return True
+        return False
 
     def show_warning_page(self, flow, message):
         """Respond with a custom warning page."""
@@ -61,7 +64,7 @@ class BlockSites:
                 return
 
     def response(self, flow: mitmproxy.http.HTTPFlow) -> None:
-        if self.is_excluded(flow.request.host):
+        if self.is_excluded(flow.request.host) or '/api/user-settings/' in flow.request.pretty_url:
             return
 
         try:
