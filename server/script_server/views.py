@@ -117,14 +117,10 @@ def get_online_users(request):
 
 @csrf_exempt
 def user_settings(request):
-    print(f"Received request method: {request.method}")
-    print(f"Headers: {request.headers}")
-    
     if request.method == 'GET':
         try:
             # Get authorization header
             auth_header = request.headers.get('Authorization', '')
-            print(f"Auth header: {auth_header}")
             
             if not auth_header.startswith('Bearer '):
                 return JsonResponse({
@@ -134,12 +130,10 @@ def user_settings(request):
             
             # Extract token (user_id)
             user_id = auth_header.split(' ')[1]
-            print(f"Extracted user_id: {user_id}")
             
             # Get or create user settings
             try:
                 settings = UserSettings.get_user_settings(user_id)
-                print(f"Retrieved settings for user {user_id}")
                 
                 response_data = {
                     'status': 'success',
@@ -147,18 +141,15 @@ def user_settings(request):
                     'excluded_sites': settings.get_excluded_sites(),
                     'categories': settings.categories
                 }
-                print(f"Sending response: {response_data}")
                 return JsonResponse(response_data)
                 
             except Exception as e:
-                print(f"Error getting settings: {str(e)}")
                 return JsonResponse({
                     'status': 'error',
                     'message': f'Error getting settings: {str(e)}'
                 }, status=400)
             
         except Exception as e:
-            print(f"General error: {str(e)}")
             return JsonResponse({
                 'status': 'error',
                 'message': str(e)
