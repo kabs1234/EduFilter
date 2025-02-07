@@ -5,7 +5,7 @@ import psycopg2
 from PyQt6.QtWidgets import (
     QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
-    QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView, QHBoxLayout
+    QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView, QHBoxLayout, QComboBox, QGroupBox
 )
 from PyQt6.QtCore import QTimer
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
@@ -238,13 +238,18 @@ class DashboardWindow(QMainWindow):
         self.setup_ui()
 
     def setup_ui(self):
-        self.tab_widget = QTabWidget()
-        self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
-        self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
-        self.tab_widget.addTab(self.create_categories_tab(), "Categories")
-        self.tab_widget.addTab(self.create_settings_tab(), "Settings")
-        self.tab_widget.addTab(self.create_online_users_tab(), "Online Users")
-        self.setCentralWidget(self.tab_widget)
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        # Create and add tabs
+        self.tabs.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
+        self.tabs.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
+        self.tabs.addTab(self.create_categories_tab(), "Categories")
+        self.tabs.addTab(self.create_settings_tab(), "Settings")
+        self.tabs.addTab(self.create_online_users_tab(), "Online Users")
+        self.tabs.addTab(self.create_user_management_tab(), "User Management")  # New tab
+
+        self.setGeometry(100, 100, 800, 600)
 
     def create_blocked_sites_tab(self):
         self.blocked_table = SiteTable('Blocked Sites')
@@ -324,6 +329,99 @@ class DashboardWindow(QMainWindow):
         container.setLayout(layout)
         return container
 
+    def create_user_management_tab(self):
+        # Create main widget and layout
+        tab = QWidget()
+        layout = QVBoxLayout()
+        
+        # Create user selection section
+        user_selection_layout = QHBoxLayout()
+        user_label = QLabel("Select User:")
+        self.user_combo = QComboBox()  # Will be populated later with user list
+        user_selection_layout.addWidget(user_label)
+        user_selection_layout.addWidget(self.user_combo)
+        user_selection_layout.addStretch()
+        
+        # Create tables for user settings
+        tables_layout = QHBoxLayout()
+        
+        # Blocked Sites Table
+        blocked_group = QGroupBox("Blocked Sites")
+        blocked_layout = QVBoxLayout()
+        self.user_blocked_table = QTableWidget()
+        self.user_blocked_table.setColumnCount(1)
+        self.user_blocked_table.setHorizontalHeaderLabels(["Site URL"])
+        self.user_blocked_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        blocked_layout.addWidget(self.user_blocked_table)
+        # Add buttons for blocked sites
+        blocked_buttons = QHBoxLayout()
+        add_blocked_btn = QPushButton("Add")
+        edit_blocked_btn = QPushButton("Edit")
+        delete_blocked_btn = QPushButton("Delete")
+        blocked_buttons.addWidget(add_blocked_btn)
+        blocked_buttons.addWidget(edit_blocked_btn)
+        blocked_buttons.addWidget(delete_blocked_btn)
+        blocked_layout.addLayout(blocked_buttons)
+        blocked_group.setLayout(blocked_layout)
+        
+        # Excluded Sites Table
+        excluded_group = QGroupBox("Excluded Sites")
+        excluded_layout = QVBoxLayout()
+        self.user_excluded_table = QTableWidget()
+        self.user_excluded_table.setColumnCount(1)
+        self.user_excluded_table.setHorizontalHeaderLabels(["Site URL"])
+        self.user_excluded_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        excluded_layout.addWidget(self.user_excluded_table)
+        # Add buttons for excluded sites
+        excluded_buttons = QHBoxLayout()
+        add_excluded_btn = QPushButton("Add")
+        edit_excluded_btn = QPushButton("Edit")
+        delete_excluded_btn = QPushButton("Delete")
+        excluded_buttons.addWidget(add_excluded_btn)
+        excluded_buttons.addWidget(edit_excluded_btn)
+        excluded_buttons.addWidget(delete_excluded_btn)
+        excluded_layout.addLayout(excluded_buttons)
+        excluded_group.setLayout(excluded_layout)
+        
+        # Categories Table
+        categories_group = QGroupBox("Categories")
+        categories_layout = QVBoxLayout()
+        self.user_categories_table = QTableWidget()
+        self.user_categories_table.setColumnCount(2)
+        self.user_categories_table.setHorizontalHeaderLabels(["Category", "Keywords"])
+        self.user_categories_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.user_categories_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        categories_layout.addWidget(self.user_categories_table)
+        # Add buttons for categories
+        categories_buttons = QHBoxLayout()
+        add_category_btn = QPushButton("Add")
+        edit_category_btn = QPushButton("Edit")
+        delete_category_btn = QPushButton("Delete")
+        categories_buttons.addWidget(add_category_btn)
+        categories_buttons.addWidget(edit_category_btn)
+        categories_buttons.addWidget(delete_category_btn)
+        categories_layout.addLayout(categories_buttons)
+        categories_group.setLayout(categories_layout)
+        
+        # Add tables to layout
+        tables_layout.addWidget(blocked_group)
+        tables_layout.addWidget(excluded_group)
+        tables_layout.addWidget(categories_group)
+        
+        # Create buttons
+        button_layout = QHBoxLayout()
+        refresh_button = QPushButton("Refresh")
+        button_layout.addWidget(refresh_button)
+        button_layout.addStretch()
+        
+        # Add all components to main layout
+        layout.addLayout(user_selection_layout)
+        layout.addLayout(tables_layout)
+        layout.addLayout(button_layout)
+        
+        tab.setLayout(layout)
+        return tab
+
     def create_tab_layout(self, table_widget, buttons):
         layout = QVBoxLayout()
         layout.addWidget(table_widget)
@@ -377,7 +475,7 @@ class DashboardWindow(QMainWindow):
                 self.restart_mitmproxy()
 
     def delete_selected_site(self):
-        current_tab = self.tab_widget.currentWidget()
+        current_tab = self.tabs.currentWidget()
         table = None
         sites_list = None
         
