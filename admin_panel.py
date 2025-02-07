@@ -59,9 +59,11 @@ class LoginDialog(BaseDialog):
         self.setMinimumWidth(300)
         
         self.username_input = QLineEdit()
+        self.username_input.setText("admin")  # Set default username for development
         self.layout.addRow('Username:', self.username_input)
         
         self.password_input = QLineEdit()
+        self.password_input.setText("1234")  # Set default password for development
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.layout.addRow('Password:', self.password_input)
         
