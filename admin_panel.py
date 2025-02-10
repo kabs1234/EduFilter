@@ -337,10 +337,18 @@ class DashboardWindow(QMainWindow):
         # Create user selection section
         user_selection_layout = QHBoxLayout()
         user_label = QLabel("Select User:")
-        self.user_combo = QComboBox()  # Will be populated later with user list
+        self.user_combo = QComboBox()  # Will be populated with online users
+        self.user_combo.setMinimumWidth(300)  # Set minimum width to make dropdown wider
         user_selection_layout.addWidget(user_label)
         user_selection_layout.addWidget(self.user_combo)
+        
+        # Add refresh button next to user selection
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_online_users)
+        user_selection_layout.addWidget(refresh_btn)
         user_selection_layout.addStretch()
+        
+        layout.addLayout(user_selection_layout)
         
         # Create tables for user settings
         tables_layout = QHBoxLayout()
@@ -408,14 +416,11 @@ class DashboardWindow(QMainWindow):
         tables_layout.addWidget(excluded_group)
         tables_layout.addWidget(categories_group)
         
-        # Create buttons
+        # Create buttons layout (empty for now, might be used later)
         button_layout = QHBoxLayout()
-        refresh_button = QPushButton("Refresh")
-        button_layout.addWidget(refresh_button)
         button_layout.addStretch()
         
         # Add all components to main layout
-        layout.addLayout(user_selection_layout)
         layout.addLayout(tables_layout)
         layout.addLayout(button_layout)
         
@@ -630,8 +635,13 @@ class DashboardWindow(QMainWindow):
             response = requests.get(f"{self.server_url}/user-ips/", timeout=5)
             if response.status_code == 200:
                 data = response.json()
+                # Update online users table
                 self.online_users_table.setRowCount(0)
+                # Update user selection dropdown
+                self.user_combo.clear()
+                
                 for user in data['user_ips']:
+                    # Add to table
                     row = self.online_users_table.rowCount()
                     self.online_users_table.insertRow(row)
                     self.online_users_table.setItem(row, 0, QTableWidgetItem(str(user['user_id'])))
@@ -639,6 +649,10 @@ class DashboardWindow(QMainWindow):
                     # Set address
                     address = f"{user['ip_address']}:{user['port']}"
                     self.online_users_table.setItem(row, 1, QTableWidgetItem(address))
+                    
+                    # Add to dropdown
+                    self.user_combo.addItem(f"User {user['user_id']} ({address})", user['user_id'])
+                    
         except Exception as e:
             print(f"Error refreshing users: {str(e)}")
 
