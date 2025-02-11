@@ -148,7 +148,63 @@ def user_settings(request):
                     'status': 'error',
                     'message': f'Error getting settings: {str(e)}'
                 }, status=400)
+                
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=400)
+    
+    elif request.method == 'POST':
+        try:
+            # Get authorization header
+            auth_header = request.headers.get('Authorization', '')
             
+            if not auth_header.startswith('Bearer '):
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Invalid authorization header format. Expected: Bearer <token>'
+                }, status=401)
+            
+            # Extract token (user_id)
+            user_id = auth_header.split(' ')[1]
+            
+            # Parse request body
+            try:
+                data = json.loads(request.body)
+                blocked_sites = data.get('blocked_sites', [])
+                excluded_sites = data.get('excluded_sites', [])
+                categories = data.get('categories', {})
+                
+                # Get existing settings or create new
+                try:
+                    settings = UserSettings.objects.get(user_id=user_id)
+                except UserSettings.DoesNotExist:
+                    settings = UserSettings(user_id=user_id)
+                
+                # Update settings
+                settings.blocked_sites = blocked_sites
+                settings.excluded_sites = excluded_sites
+                settings.categories = categories
+                settings.save()
+                
+                return JsonResponse({
+                    'status': 'success',
+                    'message': 'Settings updated successfully'
+                })
+                
+            except json.JSONDecodeError:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Invalid JSON data'
+                }, status=400)
+                
+            except Exception as e:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Error updating settings: {str(e)}'
+                }, status=400)
+                
         except Exception as e:
             return JsonResponse({
                 'status': 'error',

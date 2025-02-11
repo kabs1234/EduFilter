@@ -339,7 +339,7 @@ class DashboardWindow(QMainWindow):
         user_label = QLabel("Select User:")
         self.user_combo = QComboBox()  # Will be populated with online users
         self.user_combo.setMinimumWidth(300)  # Set minimum width to make dropdown wider
-        self.user_combo.currentIndexChanged.connect(self.on_user_selected)  # Add signal handler
+        self.user_combo.currentTextChanged.connect(self.on_user_selected)  # Add signal handler
         user_selection_layout.addWidget(user_label)
         user_selection_layout.addWidget(self.user_combo)
         
@@ -651,7 +651,7 @@ class DashboardWindow(QMainWindow):
                 # Update online users table
                 self.online_users_table.setRowCount(0)
                 # Update user selection dropdown
-                current_user = self.user_combo.currentData()  # Store current selection
+                current_user = self.user_combo.currentText()  # Store current selection
                 self.user_combo.clear()
                 
                 for user in data['user_ips']:
@@ -664,12 +664,13 @@ class DashboardWindow(QMainWindow):
                     address = f"{user['ip_address']}:{user['port']}"
                     self.online_users_table.setItem(row, 1, QTableWidgetItem(address))
                     
-                    # Add to dropdown
-                    self.user_combo.addItem(f"User {user['user_id']} ({address})", user['user_id'])
+                    # Add to dropdown with format "User ID - IP:Port"
+                    display_text = f"{user['user_id']} - {address}"
+                    self.user_combo.addItem(display_text)
                     
                 # Restore previous selection if it still exists
                 if current_user:
-                    index = self.user_combo.findData(current_user)
+                    index = self.user_combo.findText(current_user)
                     if index >= 0:
                         self.user_combo.setCurrentIndex(index)
                     
@@ -677,10 +678,14 @@ class DashboardWindow(QMainWindow):
             print(f"Error refreshing users: {str(e)}")
 
     def on_user_selected(self):
-        # Get the selected user ID from the combo box
-        user_id = self.user_combo.currentData()
-        if user_id:
+        # Get the selected user info from the combo box
+        selected_user = self.user_combo.currentText()
+        if selected_user:
             try:
+                # Extract user ID from the combo box text (format: "User ID - IP:Port")
+                user_id = selected_user.split(" - ")[0]
+                self.current_user_id = user_id  # Update current_user_id
+                
                 # Get user settings directly from the main server
                 user_settings_url = f"{self.server_url}/api/user-settings/"
                 headers = {'Authorization': f'Bearer {user_id}'}
@@ -711,10 +716,96 @@ class DashboardWindow(QMainWindow):
                         self.user_categories_table.insertRow(row)
                         self.user_categories_table.setItem(row, 0, QTableWidgetItem(category))
                         self.user_categories_table.setItem(row, 1, QTableWidgetItem(", ".join(keywords)))
-                else:
-                    QMessageBox.warning(self, "Error", f"Failed to get user settings: Server returned {user_settings_response.status_code}")
+                        
             except Exception as e:
+                print(f"Error loading user settings: {str(e)}")
                 QMessageBox.critical(self, "Error", f"Failed to load user settings: {str(e)}")
+
+    def save_user_settings(self):
+        # Get selected user's info from combo box
+        selected_user = self.user_combo.currentText()
+        if not selected_user:
+            QMessageBox.warning(self, "Error", "No user selected")
+            return
+            
+        try:
+            # Extract user ID and address from combo box text (format: "User ID - IP:Port")
+            user_id, address = selected_user.split(" - ")
+            
+            # Collect blocked sites
+            blocked_sites = []
+            for row in range(self.user_blocked_table.rowCount()):
+                blocked_sites.append(self.user_blocked_table.item(row, 0).text())
+            
+            # Collect excluded sites
+            excluded_sites = []
+            for row in range(self.user_excluded_table.rowCount()):
+                excluded_sites.append(self.user_excluded_table.item(row, 0).text())
+            
+            # Collect categories
+            categories = {}
+            for row in range(self.user_categories_table.rowCount()):
+                category = self.user_categories_table.item(row, 0).text()
+                keywords = [k.strip() for k in self.user_categories_table.item(row, 1).text().split(",")]
+                categories[category] = keywords
+            
+            # Prepare settings data
+            settings = {
+                'blocked_sites': blocked_sites,
+                'excluded_sites': excluded_sites,
+                'categories': categories
+            }
+            
+            # Save to main server using POST method
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {user_id}'
+            }
+            
+            server_response = requests.post(
+                f"{self.server_url}/api/user-settings/",
+                json=settings,
+                headers=headers,
+                verify=False
+            )
+            
+            if server_response.status_code != 200:
+                QMessageBox.warning(self, "Error", f"Failed to save settings to server: {server_response.text}")
+                return
+                
+            # Then send settings to user's status server
+            try:
+                response = requests.post(
+                    f"http://{address}/settings-update",
+                    json=settings,
+                    timeout=5,
+                    verify=False
+                )
+                
+                if response.status_code != 200:
+                    QMessageBox.warning(self, "Warning", f"Failed to send settings to user's machine: {response.text}")
+                    
+            except requests.exceptions.Timeout:
+                QMessageBox.warning(
+                    self, 
+                    "Warning", 
+                    "Settings saved to server but failed to connect to user's machine: Connection timed out. "
+                    "The changes will be applied when they reconnect."
+                )
+            except requests.exceptions.ConnectionError:
+                QMessageBox.warning(
+                    self, 
+                    "Warning", 
+                    "Settings saved to server but failed to connect to user's machine. "
+                    "The changes will be applied when they reconnect."
+                )
+            except Exception as e:
+                QMessageBox.warning(self, "Warning", f"Settings saved to server but failed to send to user's machine: {str(e)}")
+                
+        except ValueError as e:
+            QMessageBox.critical(self, "Error", "Invalid user selection format")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save settings: {str(e)}")
 
     def add_site_to_user_list(self, list_type):
         if not self.current_user_id:
@@ -849,81 +940,6 @@ class DashboardWindow(QMainWindow):
         
         if reply == QMessageBox.StandardButton.Yes:
             self.user_categories_table.removeRow(current_row)
-
-    def save_user_settings(self):
-        if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
-            return
-            
-        # Collect blocked sites
-        blocked_sites = []
-        for row in range(self.user_blocked_table.rowCount()):
-            blocked_sites.append(self.user_blocked_table.item(row, 0).text())
-            
-        # Collect excluded sites
-        excluded_sites = []
-        for row in range(self.user_excluded_table.rowCount()):
-            excluded_sites.append(self.user_excluded_table.item(row, 0).text())
-            
-        # Collect categories
-        categories = {}
-        for row in range(self.user_categories_table.rowCount()):
-            category = self.user_categories_table.item(row, 0).text()
-            keywords = [k.strip() for k in self.user_categories_table.item(row, 1).text().split(",")]
-            categories[category] = keywords
-            
-        # Get user's IP and port from combo box
-        current_text = self.user_combo.currentText()
-        if not current_text:
-            QMessageBox.warning(self, "Error", "No user selected")
-            return
-            
-        # Extract user info from combo box text (format: "User ID - IP:Port")
-        try:
-            user_address = current_text.split(" - ")[1]
-            
-            # Prepare settings data
-            settings = {
-                'blocked_sites': blocked_sites,
-                'excluded_sites': excluded_sites,
-                'categories': categories
-            }
-            
-            # Send settings to user's status server
-            try:
-                response = requests.post(
-                    f"http://{user_address}/settings-update",
-                    json=settings,
-                    timeout=5,
-                    verify=False
-                )
-                
-                if response.status_code == 200:
-                    # Also save to main server for persistence
-                    headers = {
-                        'Content-Type': 'application/json',
-                        'Authorization': f'Bearer {self.current_user_id}'
-                    }
-                    
-                    server_response = requests.post(
-                        f"{self.server_url}/api/user-settings/",
-                        json=settings,
-                        headers=headers,
-                        verify=False
-                    )
-                    
-                    if server_response.status_code == 200:
-                        QMessageBox.information(self, "Success", "User settings saved and updated successfully.")
-                    else:
-                        QMessageBox.warning(self, "Warning", "Settings updated on user's machine but failed to save to server.")
-                else:
-                    QMessageBox.warning(self, "Error", f"Failed to update user settings: {response.text}")
-                    
-            except requests.exceptions.RequestException as e:
-                QMessageBox.critical(self, "Error", f"Failed to connect to user's machine: {str(e)}")
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to parse user address: {str(e)}")
 
     def check_user_status(self, address, user_id):
         try:
