@@ -339,6 +339,7 @@ class DashboardWindow(QMainWindow):
         user_label = QLabel("Select User:")
         self.user_combo = QComboBox()  # Will be populated with online users
         self.user_combo.setMinimumWidth(300)  # Set minimum width to make dropdown wider
+        self.user_combo.currentIndexChanged.connect(self.on_user_selected)  # Add signal handler
         user_selection_layout.addWidget(user_label)
         user_selection_layout.addWidget(self.user_combo)
         
@@ -638,6 +639,7 @@ class DashboardWindow(QMainWindow):
                 # Update online users table
                 self.online_users_table.setRowCount(0)
                 # Update user selection dropdown
+                current_user = self.user_combo.currentData()  # Store current selection
                 self.user_combo.clear()
                 
                 for user in data['user_ips']:
@@ -653,8 +655,54 @@ class DashboardWindow(QMainWindow):
                     # Add to dropdown
                     self.user_combo.addItem(f"User {user['user_id']} ({address})", user['user_id'])
                     
+                # Restore previous selection if it still exists
+                if current_user:
+                    index = self.user_combo.findData(current_user)
+                    if index >= 0:
+                        self.user_combo.setCurrentIndex(index)
+                    
         except Exception as e:
             print(f"Error refreshing users: {str(e)}")
+
+    def on_user_selected(self):
+        # Get the selected user ID from the combo box
+        user_id = self.user_combo.currentData()
+        if user_id:
+            try:
+                # Get user settings directly from the main server
+                user_settings_url = f"{self.server_url}/api/user-settings/"
+                headers = {'Authorization': f'Bearer {user_id}'}
+                print(f"Getting settings from: {user_settings_url}")  # Debug print
+                
+                user_settings_response = requests.get(user_settings_url, headers=headers, timeout=5)
+                if user_settings_response.status_code == 200:
+                    data = user_settings_response.json()
+                    
+                    # Update blocked sites table
+                    self.user_blocked_table.setRowCount(0)
+                    for site in data.get('blocked_sites', []):
+                        row = self.user_blocked_table.rowCount()
+                        self.user_blocked_table.insertRow(row)
+                        self.user_blocked_table.setItem(row, 0, QTableWidgetItem(site))
+                    
+                    # Update excluded sites table
+                    self.user_excluded_table.setRowCount(0)
+                    for site in data.get('excluded_sites', []):
+                        row = self.user_excluded_table.rowCount()
+                        self.user_excluded_table.insertRow(row)
+                        self.user_excluded_table.setItem(row, 0, QTableWidgetItem(site))
+                    
+                    # Update categories table
+                    self.user_categories_table.setRowCount(0)
+                    for category, keywords in data.get('categories', {}).items():
+                        row = self.user_categories_table.rowCount()
+                        self.user_categories_table.insertRow(row)
+                        self.user_categories_table.setItem(row, 0, QTableWidgetItem(category))
+                        self.user_categories_table.setItem(row, 1, QTableWidgetItem(", ".join(keywords)))
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to get user settings: Server returned {user_settings_response.status_code}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load user settings: {str(e)}")
 
     def check_user_status(self, address, user_id):
         try:
