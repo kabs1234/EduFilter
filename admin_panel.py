@@ -365,8 +365,11 @@ class DashboardWindow(QMainWindow):
         # Add buttons for blocked sites
         blocked_buttons = QHBoxLayout()
         add_blocked_btn = QPushButton("Add")
+        add_blocked_btn.clicked.connect(lambda: self.add_site_to_user_list("blocked"))
         edit_blocked_btn = QPushButton("Edit")
+        edit_blocked_btn.clicked.connect(lambda: self.edit_user_site("blocked"))
         delete_blocked_btn = QPushButton("Delete")
+        delete_blocked_btn.clicked.connect(lambda: self.delete_user_site("blocked"))
         blocked_buttons.addWidget(add_blocked_btn)
         blocked_buttons.addWidget(edit_blocked_btn)
         blocked_buttons.addWidget(delete_blocked_btn)
@@ -384,8 +387,11 @@ class DashboardWindow(QMainWindow):
         # Add buttons for excluded sites
         excluded_buttons = QHBoxLayout()
         add_excluded_btn = QPushButton("Add")
+        add_excluded_btn.clicked.connect(lambda: self.add_site_to_user_list("excluded"))
         edit_excluded_btn = QPushButton("Edit")
+        edit_excluded_btn.clicked.connect(lambda: self.edit_user_site("excluded"))
         delete_excluded_btn = QPushButton("Delete")
+        delete_excluded_btn.clicked.connect(lambda: self.delete_user_site("excluded"))
         excluded_buttons.addWidget(add_excluded_btn)
         excluded_buttons.addWidget(edit_excluded_btn)
         excluded_buttons.addWidget(delete_excluded_btn)
@@ -404,8 +410,11 @@ class DashboardWindow(QMainWindow):
         # Add buttons for categories
         categories_buttons = QHBoxLayout()
         add_category_btn = QPushButton("Add")
+        add_category_btn.clicked.connect(self.add_user_category)
         edit_category_btn = QPushButton("Edit")
+        edit_category_btn.clicked.connect(self.edit_user_category)
         delete_category_btn = QPushButton("Delete")
+        delete_category_btn.clicked.connect(self.delete_user_category)
         categories_buttons.addWidget(add_category_btn)
         categories_buttons.addWidget(edit_category_btn)
         categories_buttons.addWidget(delete_category_btn)
@@ -417,9 +426,12 @@ class DashboardWindow(QMainWindow):
         tables_layout.addWidget(excluded_group)
         tables_layout.addWidget(categories_group)
         
-        # Create buttons layout (empty for now, might be used later)
+        # Create save button layout
         button_layout = QHBoxLayout()
+        save_btn = QPushButton("Save Changes")
+        save_btn.clicked.connect(self.save_user_settings)
         button_layout.addStretch()
+        button_layout.addWidget(save_btn)
         
         # Add all components to main layout
         layout.addLayout(tables_layout)
@@ -703,6 +715,215 @@ class DashboardWindow(QMainWindow):
                     QMessageBox.warning(self, "Error", f"Failed to get user settings: Server returned {user_settings_response.status_code}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load user settings: {str(e)}")
+
+    def add_site_to_user_list(self, list_type):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        dialog = AddSiteDialog(self)
+        if dialog.exec():
+            site = dialog.get_input()
+            if not site:
+                return
+                
+            table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
+            current_sites = []
+            for row in range(table.rowCount()):
+                current_sites.append(table.item(row, 0).text())
+                
+            if site in current_sites:
+                QMessageBox.warning(self, "Duplicate Entry", "Site is already in the list.")
+                return
+                
+            table.setRowCount(table.rowCount() + 1)
+            table.setItem(table.rowCount() - 1, 0, QTableWidgetItem(site))
+
+    def edit_user_site(self, list_type):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
+        current_row = table.currentRow()
+        
+        if current_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a site to edit.")
+            return
+            
+        current_site = table.item(current_row, 0).text()
+        dialog = AddSiteDialog(self)
+        dialog.site_input.setText(current_site)
+        
+        if dialog.exec():
+            new_site = dialog.get_input()
+            if not new_site:
+                return
+                
+            if new_site != current_site:
+                current_sites = []
+                for row in range(table.rowCount()):
+                    if row != current_row:
+                        current_sites.append(table.item(row, 0).text())
+                        
+                if new_site in current_sites:
+                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the list.")
+                    return
+                    
+            table.setItem(current_row, 0, QTableWidgetItem(new_site))
+
+    def delete_user_site(self, list_type):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
+        current_row = table.currentRow()
+        
+        if current_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
+            return
+            
+        site = table.item(current_row, 0).text()
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete {site}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            table.removeRow(current_row)
+
+    def add_user_category(self):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        category, ok = QInputDialog.getText(self, "Add Category", "Category name:")
+        if ok and category:
+            keywords, ok = QInputDialog.getText(self, "Add Keywords", "Keywords (comma-separated):")
+            if ok:
+                keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
+                row_position = self.user_categories_table.rowCount()
+                self.user_categories_table.insertRow(row_position)
+                self.user_categories_table.setItem(row_position, 0, QTableWidgetItem(category))
+                self.user_categories_table.setItem(row_position, 1, QTableWidgetItem(", ".join(keywords_list)))
+
+    def edit_user_category(self):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        current_row = self.user_categories_table.currentRow()
+        if current_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a category to edit.")
+            return
+            
+        current_category = self.user_categories_table.item(current_row, 0).text()
+        current_keywords = self.user_categories_table.item(current_row, 1).text()
+        
+        category, ok = QInputDialog.getText(self, "Edit Category", "Category name:", text=current_category)
+        if ok and category:
+            keywords, ok = QInputDialog.getText(self, "Edit Keywords", "Keywords (comma-separated):", text=current_keywords)
+            if ok:
+                keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
+                self.user_categories_table.setItem(current_row, 0, QTableWidgetItem(category))
+                self.user_categories_table.setItem(current_row, 1, QTableWidgetItem(", ".join(keywords_list)))
+
+    def delete_user_category(self):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        current_row = self.user_categories_table.currentRow()
+        if current_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a category to delete.")
+            return
+            
+        category = self.user_categories_table.item(current_row, 0).text()
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete the category '{category}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.user_categories_table.removeRow(current_row)
+
+    def save_user_settings(self):
+        if not self.current_user_id:
+            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            return
+            
+        # Collect blocked sites
+        blocked_sites = []
+        for row in range(self.user_blocked_table.rowCount()):
+            blocked_sites.append(self.user_blocked_table.item(row, 0).text())
+            
+        # Collect excluded sites
+        excluded_sites = []
+        for row in range(self.user_excluded_table.rowCount()):
+            excluded_sites.append(self.user_excluded_table.item(row, 0).text())
+            
+        # Collect categories
+        categories = {}
+        for row in range(self.user_categories_table.rowCount()):
+            category = self.user_categories_table.item(row, 0).text()
+            keywords = [k.strip() for k in self.user_categories_table.item(row, 1).text().split(",")]
+            categories[category] = keywords
+            
+        # Get user's IP and port from combo box
+        current_text = self.user_combo.currentText()
+        if not current_text:
+            QMessageBox.warning(self, "Error", "No user selected")
+            return
+            
+        # Extract user info from combo box text (format: "User ID - IP:Port")
+        try:
+            user_address = current_text.split(" - ")[1]
+            
+            # Prepare settings data
+            settings = {
+                'blocked_sites': blocked_sites,
+                'excluded_sites': excluded_sites,
+                'categories': categories
+            }
+            
+            # Send settings to user's status server
+            try:
+                response = requests.post(
+                    f"http://{user_address}/settings-update",
+                    json=settings,
+                    timeout=5,
+                    verify=False
+                )
+                
+                if response.status_code == 200:
+                    # Also save to main server for persistence
+                    headers = {
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {self.current_user_id}'
+                    }
+                    
+                    server_response = requests.post(
+                        f"{self.server_url}/api/user-settings/",
+                        json=settings,
+                        headers=headers,
+                        verify=False
+                    )
+                    
+                    if server_response.status_code == 200:
+                        QMessageBox.information(self, "Success", "User settings saved and updated successfully.")
+                    else:
+                        QMessageBox.warning(self, "Warning", "Settings updated on user's machine but failed to save to server.")
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to update user settings: {response.text}")
+                    
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, "Error", f"Failed to connect to user's machine: {str(e)}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to parse user address: {str(e)}")
 
     def check_user_status(self, address, user_id):
         try:

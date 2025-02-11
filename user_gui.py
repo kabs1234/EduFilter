@@ -44,6 +44,23 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
     
+    def do_POST(self):
+        if self.path == '/settings-update':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            settings = json.loads(post_data.decode('utf-8'))
+            
+            # Update settings in the main window
+            self.server.dashboard.update_settings(settings)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
     def log_message(self, format, *args):
         # Suppress logging
         pass
@@ -136,6 +153,7 @@ class UserDashboardWindow(QMainWindow):
         try:
             server = HTTPServer((self.local_ip, self.status_port), StatusHandler)
             server.user_id = self.api_key  # Pass user_id to handler
+            server.dashboard = self  # Pass dashboard reference to handler
             self.status_server = server
             server_thread = threading.Thread(target=server.serve_forever, daemon=True)
             server_thread.start()
@@ -144,6 +162,7 @@ class UserDashboardWindow(QMainWindow):
             try:
                 server = HTTPServer(("127.0.0.1", self.status_port), StatusHandler)
                 server.user_id = self.api_key
+                server.dashboard = self
                 self.status_server = server
                 server_thread = threading.Thread(target=server.serve_forever, daemon=True)
                 server_thread.start()
@@ -327,6 +346,22 @@ class UserDashboardWindow(QMainWindow):
                 
         except Exception:
             self.connection_status.setText("Connection Error")
+
+    def update_settings(self, settings):
+        """Update settings received from admin"""
+        try:
+            blocked_sites = settings.get('blocked_sites', [])
+            excluded_sites = settings.get('excluded_sites', [])
+            
+            # Update only if settings have changed
+            if (sorted(blocked_sites) != sorted(self.blocked_sites) or 
+                sorted(excluded_sites) != sorted(self.excluded_sites)):
+                self.blocked_sites = blocked_sites
+                self.excluded_sites = excluded_sites
+                self.blocked_table.populate(self.blocked_sites)
+                self.excluded_table.populate(self.excluded_sites)
+        except Exception as e:
+            logging.error(f"Error updating settings: {str(e)}")
 
     def closeEvent(self, event):
         confirmation = QMessageBox.question(
