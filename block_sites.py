@@ -10,16 +10,70 @@ class BlockSites:
         self.blocked_sites = []
         self.excluded_sites = []
         self.category_keywords = {}
+        self.last_update_time = 0
         self.load_blocked_sites()
 
     def load_blocked_sites(self):
+        try:
+            # First try to get settings from API
+            import requests
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+
+            server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')
+            # Get the user ID from the .env file
+            user_id = None
+            try:
+                with open('.env', 'r') as f:
+                    for line in f:
+                        if line.startswith('USER_ID='):
+                            user_id = line.strip().split('=')[1]
+                            break
+            except Exception as e:
+                ctx.log.error(f"Error reading USER_ID from .env: {e}")
+
+            if user_id:
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {user_id}'
+                }
+                
+                url = f"{server_url}/api/user-settings/"
+                
+                # Disable the proxy for this request to avoid loop
+                session = requests.Session()
+                session.trust_env = False  # Don't use environment proxies
+                
+                response = session.get(
+                    url,
+                    headers=headers,
+                    timeout=5,
+                    verify=False
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    self.blocked_sites = data.get('blocked_sites', [])
+                    self.excluded_sites = data.get('excluded_sites', [])
+                    self.category_keywords = data.get('categories', {})
+                    ctx.log.info("Settings loaded successfully from API")
+                    return
+                else:
+                    ctx.log.error(f"Failed to get settings from API (status {response.status_code}), falling back to local file")
+
+        except Exception as e:
+            ctx.log.error(f"Error fetching settings from API: {e}")
+            ctx.log.info("Falling back to local file")
+
+        # Fallback to local file if API fails
         try:
             with open(self.blocked_sites_file, 'r') as file:
                 data = json.load(file)
                 self.blocked_sites = data.get("sites", [])
                 self.excluded_sites = data.get("excluded_sites", [])
                 self.category_keywords = data.get("categories", {})
-                ctx.log.info("Configuration loaded successfully.")
+                ctx.log.info("Configuration loaded successfully from local file.")
         except (FileNotFoundError, json.JSONDecodeError) as e:
             ctx.log.error(f"Error loading {self.blocked_sites_file}: {e}")
 

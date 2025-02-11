@@ -246,8 +246,9 @@ class UserDashboardWindow(QMainWindow):
             self.connection_status.setText("Not Connected")
 
     def load_data(self):
-        """Fetch user settings from the server or use defaults."""
+        """Fetch user settings from the server or use defaults from blocked_sites.json."""
         try:
+            # First try to get settings from API
             headers = {
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {self.api_key}'
@@ -267,11 +268,28 @@ class UserDashboardWindow(QMainWindow):
                 blocked_sites = data.get('blocked_sites', [])
                 excluded_sites = data.get('excluded_sites', [])
                 return blocked_sites, excluded_sites
-            else:
-                return [], []
+            
+            # If API request fails, fall back to local file
+            logging.info("API request failed, falling back to local settings file")
+            if os.path.exists(self.blocked_sites_file):
+                with open(self.blocked_sites_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('blocked_sites', []), data.get('excluded_sites', [])
+            
+            # If both API and local file fail, return empty lists
+            return [], []
                 
         except Exception as e:
-            import traceback
+            # Log the error and try to load from local file
+            logging.error(f"Error fetching settings from API: {str(e)}")
+            try:
+                if os.path.exists(self.blocked_sites_file):
+                    with open(self.blocked_sites_file, 'r') as f:
+                        data = json.load(f)
+                        return data.get('blocked_sites', []), data.get('excluded_sites', [])
+            except Exception as file_error:
+                logging.error(f"Error loading local settings file: {str(file_error)}")
+            
             return [], []
 
     def execute_script(self):
