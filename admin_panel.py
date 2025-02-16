@@ -559,16 +559,17 @@ class DashboardWindow(QMainWindow):
                     is_list_of_lists=True
                 )
                 
-                # Update combo box
-                current_user = self.user_combo.currentText()
-                self.user_combo.clear()
-                self.user_combo.addItems(user_combo_data)
-                
-                # Restore previous selection if it still exists
-                if current_user:
-                    index = self.user_combo.findText(current_user)
-                    if index >= 0:
-                        self.user_combo.setCurrentIndex(index)
+                # Update combo box if in user management tab
+                if hasattr(self, 'user_combo'):
+                    current_user = self.user_combo.currentText()
+                    self.user_combo.clear()
+                    self.user_combo.addItems(user_combo_data)
+                    
+                    # Restore previous selection if it still exists
+                    if current_user:
+                        index = self.user_combo.findText(current_user)
+                        if index >= 0:
+                            self.user_combo.setCurrentIndex(index)
                     
         except Exception as e:
             print(f"Error refreshing users: {str(e)}")
@@ -783,6 +784,59 @@ class DashboardWindow(QMainWindow):
             self
         ):
             TableManager.delete_item(self.user_categories_table, current_row)
+
+    def edit_user_site(self, list_type):
+        if not self.current_user_id:
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
+            return
+            
+        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
+        current_row = table.currentRow()
+        if current_row == -1:
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a site to edit.",
+                self
+            )
+            return
+            
+        current_site = table.item(current_row, 0).text()
+        dialog = AddSiteDialog(self, current_site)
+        if dialog.exec():
+            new_site = dialog.get_input()
+            if new_site and new_site != current_site:
+                TableManager.edit_item(table, current_row, new_site)
+
+    def delete_user_site(self, list_type):
+        if not self.current_user_id:
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
+            return
+            
+        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
+        current_row = table.currentRow()
+        if current_row == -1:
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a site to delete.",
+                self
+            )
+            return
+            
+        site = table.item(current_row, 0).text()
+        if DialogManager.show_confirmation_dialog(
+            "Confirm Delete",
+            f"Are you sure you want to delete site '{site}'?",
+            self
+        ):
+            TableManager.delete_item(table, current_row)
 
     def check_user_status(self, address, user_id):
         try:

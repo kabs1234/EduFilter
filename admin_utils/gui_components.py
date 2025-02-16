@@ -13,10 +13,11 @@ class BaseDialog(QDialog):
         self.setLayout(self.layout)
 
 class AddSiteDialog(InputDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, current_site=None):
+        title = 'Edit Site' if current_site else 'Add Site'
         super().__init__(
-            'Add Site',
-            [("Site URL:", "")],
+            title,
+            [("Site URL:", current_site or "")],
             parent
         )
 
