@@ -19,6 +19,9 @@ from gui_components import (
     BaseDialog, AddSiteDialog, TwoFactorDialog,
     SiteTable, CategoryTable
 )
+from database_utils import DatabaseManager, DatabaseError
+from dialog_utils import DialogManager
+from table_utils import TableManager  # Import TableManager
 
 class LoginDialog(BaseDialog):
     def __init__(self, parent=None):
@@ -39,52 +42,19 @@ class LoginDialog(BaseDialog):
         login_button.clicked.connect(self.try_login)
         self.layout.addRow(login_button)
         
-        load_dotenv()
-        self.db_config = {
-            'dbname': os.getenv('DB_NAME'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'host': os.getenv('DB_HOST')
-        }
+        self.db = DatabaseManager()
         self.current_user_id = None
 
     def generate_2fa_code(self):
         return ''.join(random.choices(string.digits, k=6))
-
-    def save_2fa_code(self, cur, user_id, code):
-        # Delete any existing codes for this user
-        cur.execute(
-            "DELETE FROM two_factor_codes WHERE user_id = %s",
-            (user_id,)
-        )
-        
-        # Insert new code with 10-minute expiry
-        expiry = datetime.now() + timedelta(minutes=10)
-        cur.execute(
-            "INSERT INTO two_factor_codes (user_id, code, expiry) VALUES (%s, %s, %s)",
-            (user_id, code, expiry)
-        )
-
-    def verify_2fa_code(self, cur, user_id, entered_code):
-        cur.execute(
-            """
-            SELECT code FROM two_factor_codes 
-            WHERE user_id = %s AND code = %s AND expiry > NOW()
-            """,
-            (user_id, entered_code)
-        )
-        return cur.fetchone() is not None
 
     def try_login(self):
         username = self.username_input.text()
         password = self.password_input.text()
         
         try:
-            conn = psycopg2.connect(**self.db_config)
-            cur = conn.cursor()
-            
             # Check credentials and get user info
-            cur.execute(
+            result = self.db.execute_query(
                 """
                 SELECT id, email, is_2fa_enabled 
                 FROM users 
@@ -93,17 +63,16 @@ class LoginDialog(BaseDialog):
                 (username, password)
             )
             
-            user_data = cur.fetchone()
-            if not user_data:
-                QMessageBox.warning(self, 'Login Failed', 'Invalid username or password')
+            if not result:
+                DialogManager.show_warning_dialog('Login Failed', 'Invalid username or password', self)
                 return
 
-            user_id, email, is_2fa_enabled = user_data
-            self.current_user_id = user_id  # Store the user ID
+            user_id, email, is_2fa_enabled = result
+            self.current_user_id = user_id
             
             if is_2fa_enabled:
                 # Check if there's an active code
-                cur.execute(
+                existing_code = self.db.execute_query(
                     """
                     SELECT code FROM two_factor_codes 
                     WHERE user_id = %s AND expiry > NOW()
@@ -111,17 +80,15 @@ class LoginDialog(BaseDialog):
                     """,
                     (user_id,)
                 )
-                existing_code = cur.fetchone()
                 
                 if not existing_code:
                     # No valid code exists, generate and send new one
                     code = self.generate_2fa_code()
-                    self.save_2fa_code(cur, user_id, code)
-                    conn.commit()
+                    self.db.manage_2fa_codes(user_id, code)
                     
                     # Send code via email
                     if not send_2fa_code(email, code):
-                        QMessageBox.critical(self, 'Email Error', 'Failed to send 2FA code')
+                        DialogManager.show_error_dialog('Email Error', 'Failed to send 2FA code', self)
                         return
 
                 # Show 2FA verification dialog
@@ -131,25 +98,18 @@ class LoginDialog(BaseDialog):
                         return
                         
                     entered_code = two_factor_dialog.get_code()
-                    if self.verify_2fa_code(cur, user_id, entered_code):
+                    if self.db.manage_2fa_codes(user_id, entered_code, verify=True):
                         # Delete the used code
-                        cur.execute(
-                            "DELETE FROM two_factor_codes WHERE user_id = %s AND code = %s",
-                            (user_id, entered_code)
-                        )
-                        conn.commit()
+                        self.db.manage_2fa_codes(user_id, delete=True)
                         self.accept()
                         break  # Exit the loop on successful verification
                     else:
-                        QMessageBox.information(self, 'Verification Failed', 'Incorrect code. Please try again.')
+                        DialogManager.show_info_dialog('Verification Failed', 'Incorrect code. Please try again.', self)
             else:
                 self.accept()
             
-            cur.close()
-            conn.close()
-            
-        except Exception as e:
-            QMessageBox.critical(self, 'Database Error', f'Could not connect to database: {str(e)}')
+        except DatabaseError as e:
+            DialogManager.show_error_dialog('Database Error', f'Could not connect to database: {str(e)}', self)
 
 class DashboardWindow(QMainWindow):
     def __init__(self):
@@ -159,16 +119,8 @@ class DashboardWindow(QMainWindow):
         self.blocked_sites, self.excluded_sites, self.category_keywords = self.load_data()
         self.current_user_id = None
         
-        # Load database configuration
-        load_dotenv()
-        self.db_config = {
-            'dbname': os.getenv('DB_NAME'),
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'host': os.getenv('DB_HOST')
-        }
-        
-        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')  # Get server URL from env with fallback
+        self.db = DatabaseManager()
+        self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
         
         self.setup_ui()
 
@@ -248,9 +200,11 @@ class DashboardWindow(QMainWindow):
 
         # Create table for online users
         self.online_users_table = QTableWidget()
-        self.online_users_table.setColumnCount(2)  
-        self.online_users_table.setHorizontalHeaderLabels(['User ID', 'Address'])
-        self.online_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        TableManager.setup_table(
+            self.online_users_table,
+            ['User ID', 'Address'],
+            stretch_columns=[0, 1]
+        )
         layout.addWidget(self.online_users_table)
 
         # Refresh button
@@ -293,10 +247,13 @@ class DashboardWindow(QMainWindow):
         blocked_group = QGroupBox("Blocked Sites")
         blocked_layout = QVBoxLayout()
         self.user_blocked_table = QTableWidget()
-        self.user_blocked_table.setColumnCount(1)
-        self.user_blocked_table.setHorizontalHeaderLabels(["Site URL"])
-        self.user_blocked_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        TableManager.setup_table(
+            self.user_blocked_table,
+            ["Site URL"],
+            stretch_columns=[0]
+        )
         blocked_layout.addWidget(self.user_blocked_table)
+        
         # Add buttons for blocked sites
         blocked_buttons = QHBoxLayout()
         add_blocked_btn = QPushButton("Add")
@@ -315,10 +272,13 @@ class DashboardWindow(QMainWindow):
         excluded_group = QGroupBox("Excluded Sites")
         excluded_layout = QVBoxLayout()
         self.user_excluded_table = QTableWidget()
-        self.user_excluded_table.setColumnCount(1)
-        self.user_excluded_table.setHorizontalHeaderLabels(["Site URL"])
-        self.user_excluded_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        TableManager.setup_table(
+            self.user_excluded_table,
+            ["Site URL"],
+            stretch_columns=[0]
+        )
         excluded_layout.addWidget(self.user_excluded_table)
+        
         # Add buttons for excluded sites
         excluded_buttons = QHBoxLayout()
         add_excluded_btn = QPushButton("Add")
@@ -337,11 +297,13 @@ class DashboardWindow(QMainWindow):
         categories_group = QGroupBox("Categories")
         categories_layout = QVBoxLayout()
         self.user_categories_table = QTableWidget()
-        self.user_categories_table.setColumnCount(2)
-        self.user_categories_table.setHorizontalHeaderLabels(["Category", "Keywords"])
-        self.user_categories_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.user_categories_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        TableManager.setup_table(
+            self.user_categories_table,
+            ["Category", "Keywords"],
+            stretch_columns=[1]
+        )
         categories_layout.addWidget(self.user_categories_table)
+        
         # Add buttons for categories
         categories_buttons = QHBoxLayout()
         add_category_btn = QPushButton("Add")
@@ -409,13 +371,20 @@ class DashboardWindow(QMainWindow):
                 return
                 
             if site in self.blocked_sites or site in self.excluded_sites:
-                QMessageBox.warning(self, "Duplicate Entry", "Site is already in the blocked or excluded list.")
+                DialogManager.show_warning_dialog(
+                    "Duplicate Entry",
+                    "Site is already in the blocked or excluded list.",
+                    self
+                )
                 return
 
-            choice, ok = QInputDialog.getItem(
-                self, "Choose List", "Add site to:", 
-                ["Blocked Sites", "Excluded Sites"], 0, False
+            choice, ok = DialogManager.show_input_dialog(
+                "Choose List",
+                "Add site to:",
+                parent=self,
+                items=["Blocked Sites", "Excluded Sites"]
             )
+            
             if ok and choice:
                 if choice == "Blocked Sites":
                     self.blocked_sites.append(site)
@@ -440,7 +409,11 @@ class DashboardWindow(QMainWindow):
                 sites_list = self.excluded_sites
         
         if not table or table.currentRow() == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a site to delete.",
+                self
+            )
             return
             
         site_item = table.item(table.currentRow(), 0)
@@ -450,21 +423,28 @@ class DashboardWindow(QMainWindow):
             self.confirm_delete_site(site, list_name, sites_list, table)
 
     def confirm_delete_site(self, site, list_name, sites_list, table):
-        confirmation = QMessageBox.question(
-            self, "Confirm Delete", 
+        if DialogManager.show_confirmation_dialog(
+            "Confirm Delete",
             f"Are you sure you want to remove {site} from {list_name}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if confirmation == QMessageBox.StandardButton.Yes:
+            self
+        ):
             sites_list.remove(site)
             table.populate(sites_list)
             self.save_data()
             self.restart_mitmproxy()
 
     def add_category(self):
-        category_name, ok = QInputDialog.getText(self, "Add Category", "Category Name:")
+        category_name, ok = DialogManager.show_input_dialog(
+            "Add Category",
+            "Category Name:",
+            parent=self
+        )
         if ok and category_name:
-            keywords, ok = QInputDialog.getText(self, "Add Keywords", "Keywords (comma separated):")
+            keywords, ok = DialogManager.show_input_dialog(
+                "Add Keywords",
+                "Keywords (comma separated):",
+                parent=self
+            )
             if ok:
                 keywords_list = [kw.strip() for kw in keywords.split(',') if kw.strip()]
                 self.category_keywords[category_name] = keywords_list
@@ -474,18 +454,21 @@ class DashboardWindow(QMainWindow):
 
     def delete_category(self):
         if self.categories_table.currentRow() == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a category to delete.")
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a category to delete.",
+                self
+            )
             return
             
         category_item = self.categories_table.item(self.categories_table.currentRow(), 0)
         if category_item:
             category_name = category_item.text()
-            confirmation = QMessageBox.question(
-                self, "Confirm Delete", 
+            if DialogManager.show_confirmation_dialog(
+                "Confirm Delete",
                 f"Are you sure you want to delete category '{category_name}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if confirmation == QMessageBox.StandardButton.Yes:
+                self
+            ):
                 del self.category_keywords[category_name]
                 self.save_data()
                 self.categories_table.populate(self.category_keywords)
@@ -499,32 +482,21 @@ class DashboardWindow(QMainWindow):
         print(f"Loading settings for user ID: {user_id}")  # Debug log
         self.current_user_id = user_id
         try:
-            conn = psycopg2.connect(**self.db_config)
-            cur = conn.cursor()
-            
-            cur.execute(
-                "SELECT email, is_2fa_enabled FROM users WHERE id = %s",
-                (user_id,)
-            )
-            user_data = cur.fetchone()
-            
-            if user_data:
-                email, is_2fa_enabled = user_data
+            email, is_2fa_enabled = self.db.get_user_settings(user_id)
+            if email is not None:
                 print(f"Found user settings - Email: {email}, 2FA: {is_2fa_enabled}")  # Debug log
                 self.email_input.setText(email or "")
                 self.twofa_checkbox.setChecked(is_2fa_enabled)
             else:
                 print(f"No user data found for ID: {user_id}")  # Debug log
             
-            cur.close()
-            conn.close()
-        except Exception as e:
+        except DatabaseError as e:
             print(f"Error loading user settings: {str(e)}")  # Debug log
-            QMessageBox.critical(self, 'Database Error', f'Could not load user settings: {str(e)}')
+            DialogManager.show_error_dialog('Database Error', f'Could not load user settings: {str(e)}', self)
 
     def toggle_2fa(self, state):
         if state and not self.email_input.text().strip():
-            QMessageBox.warning(self, 'Email Required', 'Please enter an email address to enable 2FA')
+            DialogManager.show_warning_dialog('Email Required', 'Please enter an email address to enable 2FA', self)
             self.twofa_checkbox.setChecked(False)
             return
 
@@ -532,7 +504,7 @@ class DashboardWindow(QMainWindow):
         print(f"Attempting to save settings for user ID: {self.current_user_id}")  # Debug log
         if not self.current_user_id:
             print("No user ID found")  # Debug log
-            QMessageBox.warning(self, 'Error', 'No user is currently logged in')
+            DialogManager.show_warning_dialog('Error', 'No user is currently logged in', self)
             return
 
         email = self.email_input.text().strip()
@@ -540,42 +512,25 @@ class DashboardWindow(QMainWindow):
         print(f"Settings to save - Email: {email}, 2FA: {is_2fa_enabled}")  # Debug log
 
         if is_2fa_enabled and not email:
-            QMessageBox.warning(self, 'Email Required', 'Please enter an email address to enable 2FA')
+            DialogManager.show_warning_dialog('Email Required', 'Please enter an email address to enable 2FA', self)
             return
 
         try:
-            conn = psycopg2.connect(**self.db_config)
-            cur = conn.cursor()
-            
             # First verify if the user exists
-            cur.execute("SELECT id FROM users WHERE id = %s", (self.current_user_id,))
-            if not cur.fetchone():
+            if not self.db.verify_user_exists(self.current_user_id):
                 print(f"User not found in database: {self.current_user_id}")  # Debug log
-                QMessageBox.critical(self, 'Error', 'User not found')
+                DialogManager.show_error_dialog('Error', 'User not found', self)
                 return
             
             print("Executing update query...")  # Debug log
-            cur.execute(
-                """
-                UPDATE users 
-                SET email = %s, is_2fa_enabled = %s 
-                WHERE id = %s
-                RETURNING id, email, is_2fa_enabled
-                """,
-                (email, is_2fa_enabled, self.current_user_id)
-            )
+            if self.db.update_user_settings(self.current_user_id, email, is_2fa_enabled):
+                DialogManager.show_info_dialog('Success', 'Settings saved successfully', self)
+            else:
+                DialogManager.show_error_dialog('Error', 'Failed to save settings', self)
             
-            updated_user = cur.fetchone()
-            print(f"Update result: {updated_user}")  # Debug log
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            
-            QMessageBox.information(self, 'Success', 'Settings saved successfully')
-        except Exception as e:
+        except DatabaseError as e:
             print(f"Error saving settings: {str(e)}")  # Debug log
-            QMessageBox.critical(self, 'Database Error', f'Could not save settings: {str(e)}')
+            DialogManager.show_error_dialog('Database Error', f'Could not save settings: {str(e)}', self)
 
     def refresh_online_users(self):
         try:
@@ -583,26 +538,32 @@ class DashboardWindow(QMainWindow):
             response = requests.get(f"{self.server_url}/user-ips/", timeout=5)
             if response.status_code == 200:
                 data = response.json()
+                
                 # Update online users table
-                self.online_users_table.setRowCount(0)
-                # Update user selection dropdown
-                current_user = self.user_combo.currentText()  # Store current selection
-                self.user_combo.clear()
+                online_users_data = []
+                user_combo_data = []
                 
                 for user in data['user_ips']:
-                    # Add to table
-                    row = self.online_users_table.rowCount()
-                    self.online_users_table.insertRow(row)
-                    self.online_users_table.setItem(row, 0, QTableWidgetItem(str(user['user_id'])))
-                    
-                    # Set address
+                    # Prepare table data
                     address = f"{user['ip_address']}:{user['port']}"
-                    self.online_users_table.setItem(row, 1, QTableWidgetItem(address))
+                    online_users_data.append([str(user['user_id']), address])
                     
-                    # Add to dropdown with format "User ID - IP:Port"
+                    # Prepare combo box data
                     display_text = f"{user['user_id']} - {address}"
-                    self.user_combo.addItem(display_text)
-                    
+                    user_combo_data.append(display_text)
+                
+                # Update table
+                TableManager.populate_table(
+                    self.online_users_table,
+                    online_users_data,
+                    is_list_of_lists=True
+                )
+                
+                # Update combo box
+                current_user = self.user_combo.currentText()
+                self.user_combo.clear()
+                self.user_combo.addItems(user_combo_data)
+                
                 # Restore previous selection if it still exists
                 if current_user:
                     index = self.user_combo.findText(current_user)
@@ -619,7 +580,7 @@ class DashboardWindow(QMainWindow):
             try:
                 # Extract user ID from the combo box text (format: "User ID - IP:Port")
                 user_id = selected_user.split(" - ")[0]
-                self.current_user_id = user_id  # Update current_user_id
+                self.current_user_id = user_id
                 
                 # Get user settings directly from the main server
                 user_settings_url = f"{self.server_url}/api/user-settings/"
@@ -630,59 +591,30 @@ class DashboardWindow(QMainWindow):
                 if user_settings_response.status_code == 200:
                     data = user_settings_response.json()
                     
-                    # Update blocked sites table
-                    self.user_blocked_table.setRowCount(0)
-                    for site in data.get('blocked_sites', []):
-                        row = self.user_blocked_table.rowCount()
-                        self.user_blocked_table.insertRow(row)
-                        self.user_blocked_table.setItem(row, 0, QTableWidgetItem(site))
-                    
-                    # Update excluded sites table
-                    self.user_excluded_table.setRowCount(0)
-                    for site in data.get('excluded_sites', []):
-                        row = self.user_excluded_table.rowCount()
-                        self.user_excluded_table.insertRow(row)
-                        self.user_excluded_table.setItem(row, 0, QTableWidgetItem(site))
-                    
-                    # Update categories table
-                    self.user_categories_table.setRowCount(0)
-                    for category, keywords in data.get('categories', {}).items():
-                        row = self.user_categories_table.rowCount()
-                        self.user_categories_table.insertRow(row)
-                        self.user_categories_table.setItem(row, 0, QTableWidgetItem(category))
-                        self.user_categories_table.setItem(row, 1, QTableWidgetItem(", ".join(keywords)))
+                    # Update tables using TableManager
+                    TableManager.populate_table(self.user_blocked_table, data.get('blocked_sites', []))
+                    TableManager.populate_table(self.user_excluded_table, data.get('excluded_sites', []))
+                    TableManager.populate_table(self.user_categories_table, data.get('categories', {}), is_dict=True)
                         
             except Exception as e:
                 print(f"Error loading user settings: {str(e)}")
-                QMessageBox.critical(self, "Error", f"Failed to load user settings: {str(e)}")
+                DialogManager.show_error_dialog("Error", f"Failed to load user settings: {str(e)}", self)
 
     def save_user_settings(self):
         # Get selected user's info from combo box
         selected_user = self.user_combo.currentText()
         if not selected_user:
-            QMessageBox.warning(self, "Error", "No user selected")
+            DialogManager.show_warning_dialog("Error", "No user selected", self)
             return
             
         try:
             # Extract user ID and address from combo box text (format: "User ID - IP:Port")
             user_id, address = selected_user.split(" - ")
             
-            # Collect blocked sites
-            blocked_sites = []
-            for row in range(self.user_blocked_table.rowCount()):
-                blocked_sites.append(self.user_blocked_table.item(row, 0).text())
-            
-            # Collect excluded sites
-            excluded_sites = []
-            for row in range(self.user_excluded_table.rowCount()):
-                excluded_sites.append(self.user_excluded_table.item(row, 0).text())
-            
-            # Collect categories
-            categories = {}
-            for row in range(self.user_categories_table.rowCount()):
-                category = self.user_categories_table.item(row, 0).text()
-                keywords = [k.strip() for k in self.user_categories_table.item(row, 1).text().split(",")]
-                categories[category] = keywords
+            # Get data from tables using TableManager
+            blocked_sites = TableManager.get_table_data(self.user_blocked_table)
+            excluded_sites = TableManager.get_table_data(self.user_excluded_table)
+            categories = TableManager.get_table_data(self.user_categories_table, as_dict=True)
             
             # Prepare settings data
             settings = {
@@ -690,7 +622,7 @@ class DashboardWindow(QMainWindow):
                 'excluded_sites': excluded_sites,
                 'categories': categories
             }
-            
+
             # Save to main server using POST method
             headers = {
                 'Content-Type': 'application/json',
@@ -705,7 +637,7 @@ class DashboardWindow(QMainWindow):
             )
             
             if server_response.status_code != 200:
-                QMessageBox.warning(self, "Error", f"Failed to save settings to server: {server_response.text}")
+                DialogManager.show_warning_dialog("Error", f"Failed to save settings to server: {server_response.text}", self)
                 return
                 
             # Then send settings to user's status server
@@ -718,33 +650,35 @@ class DashboardWindow(QMainWindow):
                 )
                 
                 if response.status_code != 200:
-                    QMessageBox.warning(self, "Warning", f"Failed to send settings to user's machine: {response.text}")
+                    DialogManager.show_warning_dialog("Warning", f"Failed to send settings to user's machine: {response.text}", self)
                     
             except requests.exceptions.Timeout:
-                QMessageBox.warning(
-                    self, 
+                DialogManager.show_warning_dialog(
                     "Warning", 
                     "Settings saved to server but failed to connect to user's machine: Connection timed out. "
                     "The changes will be applied when they reconnect."
                 )
             except requests.exceptions.ConnectionError:
-                QMessageBox.warning(
-                    self, 
+                DialogManager.show_warning_dialog(
                     "Warning", 
                     "Settings saved to server but failed to connect to user's machine. "
                     "The changes will be applied when they reconnect."
                 )
             except Exception as e:
-                QMessageBox.warning(self, "Warning", f"Settings saved to server but failed to send to user's machine: {str(e)}")
+                DialogManager.show_warning_dialog("Warning", f"Settings saved to server but failed to send to user's machine: {str(e)}", self)
                 
         except ValueError as e:
-            QMessageBox.critical(self, "Error", "Invalid user selection format")
+            DialogManager.show_error_dialog("Error", "Invalid user selection format", self)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save settings: {str(e)}")
+            DialogManager.show_error_dialog("Error", f"Failed to save settings: {str(e)}", self)
 
     def add_site_to_user_list(self, list_type):
         if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
             return
             
         dialog = AddSiteDialog(self)
@@ -754,127 +688,101 @@ class DashboardWindow(QMainWindow):
                 return
                 
             table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
-            current_sites = []
-            for row in range(table.rowCount()):
-                current_sites.append(table.item(row, 0).text())
-                
-            if site in current_sites:
-                QMessageBox.warning(self, "Duplicate Entry", "Site is already in the list.")
-                return
-                
-            table.setRowCount(table.rowCount() + 1)
-            table.setItem(table.rowCount() - 1, 0, QTableWidgetItem(site))
-
-    def edit_user_site(self, list_type):
-        if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
-            return
-            
-        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
-        current_row = table.currentRow()
-        
-        if current_row == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a site to edit.")
-            return
-            
-        current_site = table.item(current_row, 0).text()
-        dialog = AddSiteDialog(self)
-        dialog.site_input.setText(current_site)
-        
-        if dialog.exec():
-            new_site = dialog.get_input()
-            if not new_site:
-                return
-                
-            if new_site != current_site:
-                current_sites = []
-                for row in range(table.rowCount()):
-                    if row != current_row:
-                        current_sites.append(table.item(row, 0).text())
-                        
-                if new_site in current_sites:
-                    QMessageBox.warning(self, "Duplicate Entry", "Site is already in the list.")
-                    return
-                    
-            table.setItem(current_row, 0, QTableWidgetItem(new_site))
-
-    def delete_user_site(self, list_type):
-        if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
-            return
-            
-        table = self.user_blocked_table if list_type == "blocked" else self.user_excluded_table
-        current_row = table.currentRow()
-        
-        if current_row == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a site to delete.")
-            return
-            
-        site = table.item(current_row, 0).text()
-        reply = QMessageBox.question(
-            self, "Confirm Delete",
-            f"Are you sure you want to delete {site}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            table.removeRow(current_row)
+            if not TableManager.add_item(table, site, check_duplicates=True):
+                DialogManager.show_warning_dialog(
+                    "Duplicate Entry",
+                    "Site is already in the list.",
+                    self
+                )
 
     def add_user_category(self):
         if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
             return
             
-        category, ok = QInputDialog.getText(self, "Add Category", "Category name:")
+        category, ok = DialogManager.show_input_dialog(
+            "Add Category",
+            "Category name:",
+            parent=self
+        )
         if ok and category:
-            keywords, ok = QInputDialog.getText(self, "Add Keywords", "Keywords (comma-separated):")
+            keywords, ok = DialogManager.show_input_dialog(
+                "Add Keywords",
+                "Keywords (comma separated):",
+                parent=self
+            )
             if ok:
-                keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
-                row_position = self.user_categories_table.rowCount()
-                self.user_categories_table.insertRow(row_position)
-                self.user_categories_table.setItem(row_position, 0, QTableWidgetItem(category))
-                self.user_categories_table.setItem(row_position, 1, QTableWidgetItem(", ".join(keywords_list)))
+                keywords_list = [kw.strip() for kw in keywords.split(',') if kw.strip()]
+                data = {category: keywords_list}
+                TableManager.populate_table(self.user_categories_table, data, is_dict=True)
 
     def edit_user_category(self):
         if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
             return
             
         current_row = self.user_categories_table.currentRow()
         if current_row == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a category to edit.")
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a category to edit.",
+                self
+            )
             return
             
         current_category = self.user_categories_table.item(current_row, 0).text()
         current_keywords = self.user_categories_table.item(current_row, 1).text()
         
-        category, ok = QInputDialog.getText(self, "Edit Category", "Category name:", text=current_category)
+        category, ok = DialogManager.show_input_dialog(
+            "Edit Category",
+            "Category name:",
+            default=current_category,
+            parent=self
+        )
         if ok and category:
-            keywords, ok = QInputDialog.getText(self, "Edit Keywords", "Keywords (comma-separated):", text=current_keywords)
+            keywords, ok = DialogManager.show_input_dialog(
+                "Edit Keywords",
+                "Keywords (comma separated):",
+                default=current_keywords,
+                parent=self
+            )
             if ok:
-                keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
-                self.user_categories_table.setItem(current_row, 0, QTableWidgetItem(category))
-                self.user_categories_table.setItem(current_row, 1, QTableWidgetItem(", ".join(keywords_list)))
+                keywords_list = [kw.strip() for kw in keywords.split(',') if kw.strip()]
+                TableManager.edit_item(self.user_categories_table, current_row, category, keywords_list)
 
     def delete_user_category(self):
         if not self.current_user_id:
-            QMessageBox.warning(self, "No User Selected", "Please select a user first.")
+            DialogManager.show_warning_dialog(
+                "No User Selected",
+                "Please select a user first.",
+                self
+            )
             return
             
         current_row = self.user_categories_table.currentRow()
         if current_row == -1:
-            QMessageBox.warning(self, "No Selection", "Please select a category to delete.")
+            DialogManager.show_warning_dialog(
+                "No Selection",
+                "Please select a category to delete.",
+                self
+            )
             return
             
         category = self.user_categories_table.item(current_row, 0).text()
-        reply = QMessageBox.question(
-            self, "Confirm Delete",
-            f"Are you sure you want to delete the category '{category}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.user_categories_table.removeRow(current_row)
+        if DialogManager.show_confirmation_dialog(
+            "Confirm Delete",
+            f"Are you sure you want to delete category '{category}'?",
+            self
+        ):
+            TableManager.delete_item(self.user_categories_table, current_row)
 
     def check_user_status(self, address, user_id):
         try:
