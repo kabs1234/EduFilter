@@ -15,13 +15,13 @@ import string
 from datetime import datetime, timedelta
 from email_utils import send_2fa_code
 import requests
-from gui_components import (
+from admin_utils.gui_components import (
     BaseDialog, AddSiteDialog, TwoFactorDialog,
     SiteTable, CategoryTable
 )
-from database_utils import DatabaseManager, DatabaseError
-from dialog_utils import DialogManager
-from table_utils import TableManager  # Import TableManager
+from admin_utils.database_utils import DatabaseManager, DatabaseError
+from admin_utils.dialog_utils import DialogManager
+from admin_utils.table_utils import TableManager  # Import TableManager
 
 class LoginDialog(BaseDialog):
     def __init__(self, parent=None):

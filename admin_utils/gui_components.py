@@ -2,8 +2,8 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem,
     QPushButton, QLineEdit, QDialog, QFormLayout, QHeaderView
 )
-from table_utils import TableManager
-from dialog_utils import InputDialog
+from .table_utils import TableManager
+from .dialog_utils import InputDialog
 
 class BaseDialog(QDialog):
     def __init__(self, title, parent=None):
