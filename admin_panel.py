@@ -640,38 +640,12 @@ class DashboardWindow(QMainWindow):
             if server_response.status_code != 200:
                 DialogManager.show_warning_dialog("Error", f"Failed to save settings to server: {server_response.text}", self)
                 return
-                
-            # Then send settings to user's status server
-            try:
-                response = requests.post(
-                    f"http://{address}/settings-update",
-                    json=settings,
-                    timeout=5,
-                    verify=False
-                )
-                
-                if response.status_code != 200:
-                    DialogManager.show_warning_dialog("Warning", f"Failed to send settings to user's machine: {response.text}", self)
-                    
-            except requests.exceptions.Timeout:
-                DialogManager.show_warning_dialog(
-                    "Warning", 
-                    "Settings saved to server but failed to connect to user's machine: Connection timed out. "
-                    "The changes will be applied when they reconnect."
-                )
-            except requests.exceptions.ConnectionError:
-                DialogManager.show_warning_dialog(
-                    "Warning", 
-                    "Settings saved to server but failed to connect to user's machine. "
-                    "The changes will be applied when they reconnect."
-                )
-            except Exception as e:
-                DialogManager.show_warning_dialog("Warning", f"Settings saved to server but failed to send to user's machine: {str(e)}", self)
-                
-        except ValueError as e:
-            DialogManager.show_error_dialog("Error", "Invalid user selection format", self)
+            
+            DialogManager.show_info_dialog("Success", "Settings saved successfully. They will be applied when the user's client next polls for updates.", self)
+            
         except Exception as e:
-            DialogManager.show_error_dialog("Error", f"Failed to save settings: {str(e)}", self)
+            print(f"Error saving user settings: {str(e)}")
+            DialogManager.show_error_dialog("Error", f"Failed to save user settings: {str(e)}", self)
 
     def add_site_to_user_list(self, list_type):
         if not self.current_user_id:
