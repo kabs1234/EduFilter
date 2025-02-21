@@ -116,7 +116,7 @@ def get_online_users(request):
     return JsonResponse({'online_users': list(online_users)})
 
 @csrf_exempt
-def user_settings(request):
+def user_settings(request, user_id):
     if request.method == 'GET':
         try:
             # Get authorization header
@@ -128,8 +128,13 @@ def user_settings(request):
                     'message': 'Invalid authorization header format. Expected: Bearer <token>'
                 }, status=401)
             
-            # Extract token (user_id)
-            user_id = auth_header.split(' ')[1]
+            # Extract token and verify it matches the URL user_id
+            token = auth_header.split(' ')[1]
+            if token != user_id:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Token does not match user ID'
+                }, status=401)
             
             # Get or create user settings
             try:
@@ -166,8 +171,13 @@ def user_settings(request):
                     'message': 'Invalid authorization header format. Expected: Bearer <token>'
                 }, status=401)
             
-            # Extract token (user_id)
-            user_id = auth_header.split(' ')[1]
+            # Extract token and verify it matches the URL user_id
+            token = auth_header.split(' ')[1]
+            if token != user_id:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Token does not match user ID'
+                }, status=401)
             
             # Parse request body
             try:

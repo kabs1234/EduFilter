@@ -6,7 +6,7 @@ from django.urls import include, path
 from . import views, admin_views
 
 script_executor_patterns = [
-    path('user-settings/', views.user_settings, name='user_settings'),
+    path('user-settings/<str:user_id>/', views.user_settings, name='user_settings'),
     path('register-ip/', views.register_ip, name='register_ip'),
     path('delete-ip/', views.delete_ip, name='delete_ip'),
 ]

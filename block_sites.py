@@ -39,7 +39,7 @@ class BlockSites:
                     'Authorization': f'Bearer {user_id}'
                 }
                 
-                url = f"{server_url}/api/user-settings/"
+                url = f"{server_url}/api/user-settings/{user_id}/"
                 
                 # Disable the proxy for this request to avoid loop
                 session = requests.Session()

@@ -584,7 +584,7 @@ class DashboardWindow(QMainWindow):
                 self.current_user_id = user_id
                 
                 # Get user settings directly from the main server
-                user_settings_url = f"{self.server_url}/api/user-settings/"
+                user_settings_url = f"{self.server_url}/api/user-settings/{user_id}/"
                 headers = {'Authorization': f'Bearer {user_id}'}
                 print(f"Getting settings from: {user_settings_url}")  # Debug print
                 
@@ -631,7 +631,7 @@ class DashboardWindow(QMainWindow):
             }
             
             server_response = requests.post(
-                f"{self.server_url}/api/user-settings/",
+                f"{self.server_url}/api/user-settings/{user_id}/",
                 json=settings,
                 headers=headers,
                 verify=False

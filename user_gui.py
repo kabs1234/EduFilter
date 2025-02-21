@@ -233,7 +233,7 @@ class UserDashboardWindow(QMainWindow):
                 'Authorization': f'Bearer {self.api_key}'
             }
             
-            url = f"{self.server_url}/api/user-settings/"
+            url = f"{self.server_url}/api/user-settings/{self.user_id}/"
             
             response = requests.get(
                 url,
