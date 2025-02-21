@@ -43,27 +43,6 @@ class StatusHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-    
-    def do_POST(self):
-        if self.path == '/settings-update':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            settings = json.loads(post_data.decode('utf-8'))
-            
-            # Update settings in the main window
-            self.server.dashboard.update_settings(settings)
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "success"}).encode())
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        # Suppress logging
-        pass
 
 class SiteTable(QTableWidget):
     def __init__(self, header_label):
