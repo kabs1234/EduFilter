@@ -366,14 +366,36 @@ class UserDashboardWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirmation == QMessageBox.StandardButton.Yes:
-            # Unregister IP
-            self.unregister_ip()
-            # Stop the status server
-            if hasattr(self, 'status_server'):
-                self.status_server.shutdown()
-                self.status_server.server_close()
-            disable_windows_proxy()
-            event.accept()
+            try:
+                # First close WebSocket connection if it exists
+                if hasattr(self, 'websocket'):
+                    try:
+                        self.websocket.close()
+                    except:
+                        pass  # Ignore WebSocket closure errors
+                
+                # Stop the status server if it exists
+                if hasattr(self, 'status_server'):
+                    try:
+                        self.status_server.shutdown()
+                        self.status_server.server_close()
+                    except:
+                        pass
+                
+                # Disable proxy
+                disable_windows_proxy()
+                
+                # Unregister IP (this might need database)
+                try:
+                    self.unregister_ip()
+                except:
+                    pass  # Ignore any final cleanup errors
+                
+                # Accept the close event
+                event.accept()
+            except Exception as e:
+                print(f"Error during final cleanup: {e}")
+                event.accept()
         else:
             event.ignore()
 

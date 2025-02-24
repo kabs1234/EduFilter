@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QDialog, QFormLayout, QMessageBox, 
     QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView, QHBoxLayout, QComboBox, QGroupBox
 )
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtWebSockets import QWebSocket
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
 import random
@@ -122,11 +123,72 @@ class DashboardWindow(QMainWindow):
         self.db = DatabaseManager()
         self.server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
         
+        # Initialize WebSocket
+        self.websocket = QWebSocket()
+        self.websocket.connected.connect(self.on_websocket_connected)
+        self.websocket.disconnected.connect(self.on_websocket_disconnected)
+        self.websocket.textMessageReceived.connect(self.on_websocket_message)
+        
+        # Get WebSocket URL from server URL
+        ws_protocol = 'ws' if 'http://' in self.server_url else 'wss'
+        base_url = self.server_url.replace('http://', '').replace('https://', '')
+        self.ws_url = f"{ws_protocol}://{base_url}/ws/status/"
+        
+        # Status label for WebSocket connection
+        self.connection_status = QLabel("WebSocket: Not Connected")
+        
         self.setup_ui()
+        
+        # Connect to WebSocket after UI is set up
+        self.connect_websocket()
+
+    def connect_websocket(self):
+        """Connect to the WebSocket server"""
+        self.websocket.open(QUrl(self.ws_url))
+
+    def on_websocket_connected(self):
+        """Handle WebSocket connection"""
+        self.connection_status.setText("WebSocket: Connected")
+        # Send initial admin status message
+        self.websocket.sendTextMessage(json.dumps({
+            'type': 'admin_connect',
+            'message': 'Admin connected'
+        }))
+
+    def on_websocket_disconnected(self):
+        """Handle WebSocket disconnection"""
+        self.connection_status.setText("WebSocket: Disconnected")
+        # Try to reconnect after a delay
+        QTimer.singleShot(5000, self.connect_websocket)
+
+    def on_websocket_message(self, message):
+        """Handle incoming WebSocket messages"""
+        try:
+            data = json.loads(message)
+            if 'type' in data:
+                if data['type'] == 'user_status':
+                    # Update online users list
+                    self.refresh_online_users()
+                elif data['type'] == 'settings_change':
+                    # Refresh settings if currently viewing this user
+                    if self.current_user_id == data.get('user_id'):
+                        self.load_user_settings(self.current_user_id)
+        except json.JSONDecodeError:
+            print(f"Invalid JSON message received: {message}")
 
     def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout()
+        central_widget.setLayout(layout)
+        
+        # Add connection status at the top
+        layout.addWidget(self.connection_status)
+        
+        # Add tab widget
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        layout.addWidget(self.tabs)
 
         # Create and add tabs
         self.tabs.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
@@ -824,15 +886,33 @@ class DashboardWindow(QMainWindow):
             return False, "Offline"
 
     def closeEvent(self, event):
-        # Stop the refresh timer when closing the window
         confirmation = QMessageBox.question(
             self, "Confirm Exit", "Are you sure you want to exit?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirmation == QMessageBox.StandardButton.Yes:
-            disable_windows_proxy()
-            self.save_data()
-            event.accept()
+            try:
+                # First close WebSocket connection if it exists
+                if hasattr(self, 'websocket'):
+                    try:
+                        self.websocket.close()
+                    except:
+                        pass  # Ignore WebSocket closure errors
+                
+                # Save current data (might need database)
+                try:
+                    self.save_data()
+                except Exception as e:
+                    print(f"Error saving data: {e}")
+                
+                # Disable proxy
+                disable_windows_proxy()
+                
+                # Accept the close event
+                event.accept()
+            except Exception as e:
+                print(f"Error during final cleanup: {e}")
+                event.accept()
         else:
             event.ignore()
 
