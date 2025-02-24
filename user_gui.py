@@ -3,17 +3,18 @@ import os
 import requests
 import uuid
 from PyQt6.QtWidgets import (
-    QMainWindow, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget, QTabWidget, QApplication, QMessageBox,
-    QPushButton, QLineEdit, QLabel, QHBoxLayout, QFormLayout
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
+    QPushButton, QTableWidget, QTableWidgetItem, QLabel,
+    QMessageBox, QHBoxLayout, QLineEdit, QFormLayout
 )
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtWebSockets import QWebSocket
 from dotenv import load_dotenv
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-import socket
 import logging
+import socket
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Load environment variables
 load_dotenv()
@@ -71,7 +72,17 @@ class UserDashboardWindow(QMainWindow):
         self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
         
         # Initialize connection status label
-        self.connection_status = QLabel("Not Connected")
+        self.connection_status = QLabel("WebSocket: Not Connected")
+        
+        # Initialize WebSocket
+        self.websocket = QWebSocket()
+        self.websocket.connected.connect(self.on_websocket_connected)
+        self.websocket.disconnected.connect(self.on_websocket_disconnected)
+        self.websocket.textMessageReceived.connect(self.on_websocket_message)
+        
+        # Get WebSocket URL from server URL
+        ws_url = self.server_url.replace('http://', 'ws://') + '/ws/status/'
+        self.ws_url = ws_url
         
         # Start status server
         self.local_ip = get_local_ip()
@@ -85,6 +96,9 @@ class UserDashboardWindow(QMainWindow):
         self.blocked_sites, self.excluded_sites = self.load_data()
         
         self.setup_ui()
+        
+        # Connect to WebSocket after UI is set up
+        self.connect_websocket()
 
     def get_or_create_user_id(self):
         """Get existing user ID from .env file or create a new one."""
@@ -148,6 +162,42 @@ class UserDashboardWindow(QMainWindow):
                 self.local_ip = "127.0.0.1"
             except Exception:
                 pass  # Silently handle server start failure
+
+    def connect_websocket(self):
+        """Connect to the WebSocket server"""
+        self.websocket.open(QUrl(self.ws_url))
+
+    def on_websocket_connected(self):
+        """Handle WebSocket connection"""
+        self.connection_status.setText("WebSocket: Connected")
+        # Send initial user status
+        self.websocket.sendTextMessage(json.dumps({
+            'type': 'user_status',
+            'user_id': self.user_id,
+            'status': 'online'
+        }))
+
+    def on_websocket_disconnected(self):
+        """Handle WebSocket disconnection"""
+        self.connection_status.setText("WebSocket: Disconnected")
+        # Try to reconnect after 5 seconds
+        QTimer.singleShot(5000, self.connect_websocket)
+
+    def on_websocket_message(self, message):
+        """Handle incoming WebSocket messages"""
+        try:
+            data = json.loads(message)
+            message_type = data.get('type')
+            
+            if message_type == 'settings_change':
+                # Update settings if they changed
+                if data.get('user_id') == self.user_id:
+                    self.update_settings(data.get('settings', {}))
+            
+        except json.JSONDecodeError:
+            print("Error: Invalid JSON message received")
+        except Exception as e:
+            print(f"Error handling WebSocket message: {e}")
 
     def setup_ui(self):
         self.tab_widget = QTabWidget()
