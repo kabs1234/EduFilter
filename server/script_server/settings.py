@@ -32,9 +32,9 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-ak493q9$!=1_jg71rse
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
 
 # Get server URL and parse it for ALLOWED_HOSTS
-server_url = os.getenv('SERVER_URL', 'http://192.168.0.103:8000')
+server_url = os.getenv('SERVER_URL', 'http://192.168.0.102:8000')
 server_host = server_url.split('://')[1].split(':')[0]
-ALLOWED_HOSTS = [server_host, 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = [server_host, 'localhost', '127.0.0.1', '0.0.0.0', '*']
 
 
 # Application definition
@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'script_executor',
     'script_server',
 ]
@@ -80,6 +81,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'script_server.wsgi.application'
 
+ASGI_APPLICATION = 'script_server.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
@@ -131,6 +133,13 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Channels configuration
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer'
+    }
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field

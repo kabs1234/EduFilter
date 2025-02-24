@@ -11,6 +11,18 @@ The server will be available at:
 - Local: http://127.0.0.1:8000
 - Network: http://<your-ip-address>:8000
 
+## Start WebSocket-enabled Server
+To start the Daphne server with WebSocket support:
+```bash
+cd server
+daphne -b 192.168.0.102 -p 8000 script_server.asgi:application
+```
+
+This server supports both HTTP and WebSocket protocols and is suitable for production use.
+The server will be available at:
+- HTTP: http://192.168.0.102:8000
+- WebSocket: ws://192.168.0.102:8000/ws/status/
+
 ## Database Commands
 
 ### Apply Migrations
