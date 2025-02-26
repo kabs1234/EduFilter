@@ -3,9 +3,9 @@ import os
 import requests
 import uuid
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel,
-    QMessageBox, QHBoxLayout, QLineEdit, QFormLayout
+    QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QPushButton, QWidget, QLineEdit, QMessageBox,
+    QTabWidget, QStatusBar, QLabel, QHBoxLayout, QFormLayout
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtWebSockets import QWebSocket
@@ -41,6 +41,28 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = {"status": "online", "user_id": self.server.user_id}
             self.wfile.write(json.dumps(response).encode())
+        elif self.path == '/reload':
+            self.send_response(200)
+            self.end_headers()
+            # Trigger a reload of the proxy settings
+            # This is a workaround to get mitmproxy to reload its settings
+            logging.info("Received reload signal, reloading proxy settings...")
+            try:
+                # Reload the block_sites.py script
+                # For mitmproxy, we need to save the settings to a file that it can access
+                with open('blocked_sites.json', 'r') as f:
+                    data = json.load(f)
+                    blocked_sites = data.get('blocked_sites', [])
+                    excluded_sites = data.get('excluded_sites', [])
+                    categories = data.get('categories', {})
+                # Update the dashboard with the new settings
+                self.server.dashboard.blocked_sites = blocked_sites
+                self.server.dashboard.excluded_sites = excluded_sites
+                self.server.dashboard.blocked_table.populate(blocked_sites)
+                self.server.dashboard.excluded_table.populate(excluded_sites)
+                logging.info("Proxy settings reloaded")
+            except Exception as e:
+                logging.error(f"Error reloading proxy settings: {str(e)}", exc_info=True)
         else:
             self.send_response(404)
             self.end_headers()
@@ -189,15 +211,38 @@ class UserDashboardWindow(QMainWindow):
             data = json.loads(message)
             message_type = data.get('type')
             
+            logging.info(f"WebSocket message received: {message_type}")
+            logging.debug(f"Message content: {data}")
+            
             if message_type == 'settings_change':
                 # Update settings if they changed
                 if data.get('user_id') == self.user_id:
-                    self.update_settings(data.get('settings', {}))
+                    logging.info("Received settings update for this user")
+                    settings = data.get('settings', {})
+                    self.update_settings(settings)
+                    
+                    # Reload proxy settings
+                    self.reload_proxy_settings()
+                    
+                    # Show notification to user
+                    self.statusBar().showMessage("Settings updated from admin panel", 5000)
+            elif message_type == 'ping':
+                # Respond to ping with pong
+                logging.debug("Received ping, sending pong")
+                self.websocket.sendTextMessage(json.dumps({
+                    'type': 'pong',
+                    'user_id': self.user_id
+                }))
+            elif message_type == 'admin_connected':
+                logging.info("Admin connection confirmed")
+                # Optionally refresh status or update UI
+            else:
+                logging.warning(f"Unknown message type received: {message_type}")
             
         except json.JSONDecodeError:
-            print("Error: Invalid JSON message received")
+            logging.error(f"Error: Invalid JSON message received: {message}")
         except Exception as e:
-            print(f"Error handling WebSocket message: {e}")
+            logging.error(f"Error handling WebSocket message: {str(e)}", exc_info=True)
 
     def setup_ui(self):
         self.tab_widget = QTabWidget()
@@ -205,6 +250,8 @@ class UserDashboardWindow(QMainWindow):
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
         self.tab_widget.addTab(self.create_script_execution_tab(), "Script Execution")
         self.setCentralWidget(self.tab_widget)
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
 
     def create_blocked_sites_tab(self):
         self.blocked_table = SiteTable('Blocked Sites')
@@ -397,18 +444,80 @@ class UserDashboardWindow(QMainWindow):
     def update_settings(self, settings):
         """Update settings received from admin"""
         try:
+            logging.info("Processing settings update")
+            
+            # Extract settings with proper defaults
             blocked_sites = settings.get('blocked_sites', [])
             excluded_sites = settings.get('excluded_sites', [])
+            categories = settings.get('categories', {})
             
-            # Update only if settings have changed
-            if (sorted(blocked_sites) != sorted(self.blocked_sites) or 
-                sorted(excluded_sites) != sorted(self.excluded_sites)):
+            # Log changes for debugging
+            logging.debug(f"New blocked sites: {blocked_sites}")
+            logging.debug(f"New excluded sites: {excluded_sites}")
+            logging.debug(f"New categories: {categories}")
+            
+            # Check if settings have actually changed
+            blocked_changed = sorted(blocked_sites) != sorted(self.blocked_sites)
+            excluded_changed = sorted(excluded_sites) != sorted(self.excluded_sites)
+            
+            if blocked_changed or excluded_changed:
+                logging.info("Settings have changed, updating UI and local data")
+                
+                # Update local data
                 self.blocked_sites = blocked_sites
                 self.excluded_sites = excluded_sites
+                
+                # Update UI tables
                 self.blocked_table.populate(self.blocked_sites)
                 self.excluded_table.populate(self.excluded_sites)
+                
+                # Save to local file as backup
+                try:
+                    with open(self.blocked_sites_file, 'w') as f:
+                        json.dump({
+                            'blocked_sites': self.blocked_sites,
+                            'excluded_sites': self.excluded_sites,
+                            'categories': categories
+                        }, f, indent=4)
+                    logging.info("Settings saved to local file")
+                except Exception as save_error:
+                    logging.error(f"Error saving settings to local file: {str(save_error)}")
+            else:
+                logging.info("No changes in settings detected")
+                
         except Exception as e:
-            logging.error(f"Error updating settings: {str(e)}")
+            logging.error(f"Error updating settings: {str(e)}", exc_info=True)
+
+    def reload_proxy_settings(self):
+        """Reload the proxy settings by reloading the block_sites.py script"""
+        logging.info("Reloading proxy settings...")
+        try:
+            # For mitmproxy, we need to save the settings to a file that it can access
+            with open('blocked_sites.json', 'w') as f:
+                json.dump({
+                    'blocked_sites': self.blocked_sites,
+                    'excluded_sites': self.excluded_sites,
+                    'categories': {}  # We don't store categories in user GUI
+                }, f, indent=4)
+            
+            logging.info("Proxy settings saved to blocked_sites.json for mitmproxy to reload")
+            
+            # Send a message to the status server to trigger a reload
+            # This is a workaround to get mitmproxy to reload its settings
+            url = f"http://{self.local_ip}:{self.status_port}/reload"
+            logging.debug(f"Sending request to reload proxy: {url}")
+            try:
+                # Use a session to avoid the proxy for this request
+                session = requests.Session()
+                session.trust_env = False  # Don't use environment proxies
+                session.get(url, timeout=1)  # Short timeout, we don't need a response
+            except requests.exceptions.RequestException:
+                # This is expected to timeout or fail, it's just a trigger
+                pass
+                
+            logging.info("Reload signal sent to proxy")
+        except Exception as e:
+            logging.error(f"Error reloading proxy settings: {str(e)}", exc_info=True)
 
     def closeEvent(self, event):
         confirmation = QMessageBox.question(

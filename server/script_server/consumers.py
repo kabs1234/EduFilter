@@ -82,8 +82,27 @@ class StatusConsumer(AsyncWebsocketConsumer):
                         }
                     }
                 )
+                
+            elif message_type == 'ping':
+                # Handle ping message
+                logger.debug(f"Ping received from {self.client_ip}:{self.client_port}")
+                # Echo back a pong message
+                await self.send(text_data=json.dumps({
+                    'type': 'pong',
+                    'timestamp': data.get('timestamp')
+                }))
+                
+            elif message_type == 'pong':
+                # Handle pong response
+                logger.debug(f"Pong received from {self.client_ip}:{self.client_port}")
+                # No action needed, just log it
+                
             else:
                 logger.warning(f"Unknown message type received: {message_type}")
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'message': f'Unknown message type: {message_type}'
+                }))
                 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON received: {text_data}")

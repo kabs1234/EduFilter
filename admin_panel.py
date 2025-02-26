@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (
     QInputDialog, QTabWidget, QLabel, QCheckBox, QHeaderView, QHBoxLayout, QComboBox, QGroupBox
 )
 from PyQt6.QtCore import QTimer, QUrl
-from PyQt6.QtWebSockets import QWebSocket
+from PyQt6.QtWebSockets import QWebSocket, QWebSocketProtocol
+from PyQt6.QtNetwork import QAbstractSocket
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
 import subprocess
 import random
@@ -154,12 +155,31 @@ class DashboardWindow(QMainWindow):
             'type': 'admin_connect',
             'message': 'Admin connected'
         }))
+        
+        # Start ping timer to keep connection alive
+        self.ping_timer = QTimer()
+        self.ping_timer.timeout.connect(self.send_ping)
+        self.ping_timer.start(20000)  # Send ping every 20 seconds
 
     def on_websocket_disconnected(self):
         """Handle WebSocket disconnection"""
         self.connection_status.setText("WebSocket: Disconnected")
+        
+        # Stop ping timer if it exists
+        if hasattr(self, 'ping_timer'):
+            self.ping_timer.stop()
+            
         # Try to reconnect after a delay
         QTimer.singleShot(5000, self.connect_websocket)
+
+    def send_ping(self):
+        """Send ping message to keep WebSocket connection alive"""
+        if self.websocket.state() == QAbstractSocket.SocketState.ConnectedState:
+            self.websocket.sendTextMessage(json.dumps({
+                'type': 'ping',
+                'timestamp': str(datetime.now())
+            }))
+            print("Ping sent to WebSocket server")
 
     def on_websocket_message(self, message):
         """Handle incoming WebSocket messages"""
@@ -173,8 +193,16 @@ class DashboardWindow(QMainWindow):
                     # Refresh settings if currently viewing this user
                     if self.current_user_id == data.get('user_id'):
                         self.load_user_settings(self.current_user_id)
+                elif data['type'] == 'pong':
+                    # Received pong response
+                    print(f"Received pong from user {data.get('user_id', 'unknown')}")
+                elif data['type'] == 'error':
+                    # Handle error message
+                    print(f"WebSocket error: {data.get('message', 'Unknown error')}")
         except json.JSONDecodeError:
             print(f"Invalid JSON message received: {message}")
+        except Exception as e:
+            print(f"Error processing WebSocket message: {str(e)}")
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -544,17 +572,38 @@ class DashboardWindow(QMainWindow):
         print(f"Loading settings for user ID: {user_id}")  # Debug log
         self.current_user_id = user_id
         try:
-            email, is_2fa_enabled = self.db.get_user_settings(user_id)
-            if email is not None:
-                print(f"Found user settings - Email: {email}, 2FA: {is_2fa_enabled}")  # Debug log
-                self.email_input.setText(email or "")
-                self.twofa_checkbox.setChecked(is_2fa_enabled)
+            # Check if user_id is in UUID format (contains hyphens)
+            if '-' in str(user_id):
+                # For UUID users, get settings from the API server instead of database
+                user_settings_url = f"{self.server_url}/api/user-settings/{user_id}/"
+                headers = {'Authorization': f'Bearer {user_id}'}
+                response = requests.get(user_settings_url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    # Set placeholder values since we're not using the database for UUID users
+                    email = f"User-{user_id[:8]}"
+                    is_2fa_enabled = False
+                    print(f"Found API user - ID: {user_id}")
+                    self.email_input.setText(email)
+                    self.twofa_checkbox.setChecked(is_2fa_enabled)
+                else:
+                    print(f"No API user data found for ID: {user_id}")
+                    self.email_input.setText("")
+                    self.twofa_checkbox.setChecked(False)
             else:
-                print(f"No user data found for ID: {user_id}")  # Debug log
+                # For numeric IDs, use the database as before
+                email, is_2fa_enabled = self.db.get_user_settings(user_id)
+                if email is not None:
+                    print(f"Found user settings - Email: {email}, 2FA: {is_2fa_enabled}")
+                    self.email_input.setText(email or "")
+                    self.twofa_checkbox.setChecked(is_2fa_enabled)
+                else:
+                    print(f"No user data found for ID: {user_id}")
+                    self.email_input.setText("")
+                    self.twofa_checkbox.setChecked(False)
             
-        except DatabaseError as e:
-            print(f"Error loading user settings: {str(e)}")  # Debug log
-            DialogManager.show_error_dialog('Database Error', f'Could not load user settings: {str(e)}', self)
+        except Exception as e:
+            print(f"Error loading user settings: {str(e)}")
+            DialogManager.show_error_dialog('Error', f'Could not load user settings: {str(e)}', self)
 
     def toggle_2fa(self, state):
         if state and not self.email_input.text().strip():
@@ -703,10 +752,23 @@ class DashboardWindow(QMainWindow):
                 DialogManager.show_warning_dialog("Error", f"Failed to save settings to server: {server_response.text}", self)
                 return
             
-            DialogManager.show_info_dialog("Success", "Settings saved successfully. They will be applied when the user's client next polls for updates.", self)
+            # Send WebSocket message to notify clients about settings change
+            if self.websocket.state() == QAbstractSocket.SocketState.ConnectedState:
+                self.websocket.sendTextMessage(json.dumps({
+                    'type': 'settings_change',
+                    'user_id': user_id,
+                    'settings': settings
+                }))
+                print(f"WebSocket notification sent for user {user_id} settings change")
+            else:
+                print(f"WebSocket not connected (state: {self.websocket.state()}), can't send settings change notification")
+            
+            DialogManager.show_info_dialog("Success", "Settings saved successfully and notification sent to user.", self)
             
         except Exception as e:
             print(f"Error saving user settings: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print the full exception traceback
             DialogManager.show_error_dialog("Error", f"Failed to save user settings: {str(e)}", self)
 
     def add_site_to_user_list(self, list_type):

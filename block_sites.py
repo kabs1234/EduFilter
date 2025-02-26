@@ -11,6 +11,7 @@ class BlockSites:
         self.excluded_sites = []
         self.category_keywords = {}
         self.last_update_time = 0
+        self.reload_interval = 5  # Check for updates every 5 seconds
         self.load_blocked_sites()
 
     def load_blocked_sites(self):
@@ -107,6 +108,12 @@ class BlockSites:
         )
 
     def request(self, flow: mitmproxy.http.HTTPFlow) -> None:
+        import time
+        current_time = time.time()
+        if current_time - self.last_update_time > self.reload_interval:
+            self.load_blocked_sites()
+            self.last_update_time = current_time
+
         if self.is_excluded(flow.request.host):
             ctx.log.info(f"Allowing excluded site: {flow.request.pretty_url}")
             return

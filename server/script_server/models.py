@@ -12,7 +12,7 @@ class UserIP(models.Model):
         return f"{self.user_id} - {self.ip_address}:{self.port}"
 
 class UserStatus(models.Model):
-    user_id = models.IntegerField(unique=True)
+    user_id = models.CharField(max_length=100, unique=True)
     last_heartbeat = models.DateTimeField(default=timezone.now)
     is_online = models.BooleanField(default=True)
 
