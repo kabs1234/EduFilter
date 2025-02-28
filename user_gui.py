@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QStatusBar, QLabel, QHBoxLayout, QFormLayout
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtNetwork import QNetworkProxy
 from PyQt6.QtWebSockets import QWebSocket
 from dotenv import load_dotenv
 from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
@@ -187,6 +188,10 @@ class UserDashboardWindow(QMainWindow):
 
     def connect_websocket(self):
         """Connect to the WebSocket server"""
+        # Configure QWebSocket to bypass proxy
+        proxy = QNetworkProxy()
+        proxy.setType(QNetworkProxy.ProxyType.NoProxy)
+        self.websocket.setProxy(proxy)
         self.websocket.open(QUrl(self.ws_url))
 
     def on_websocket_connected(self):
