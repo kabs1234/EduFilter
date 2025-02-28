@@ -84,6 +84,23 @@ class SiteTable(QTableWidget):
         self.insertRow(row_position)
         self.setItem(row_position, 0, QTableWidgetItem(site))
 
+class CategoryTable(QTableWidget):
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(2)
+        self.setHorizontalHeaderLabels(['Category', 'Keywords'])
+        self.horizontalHeader().setStretchLastSection(True)
+
+    def populate(self, categories):
+        self.setRowCount(0)
+        for category, keywords in categories.items():
+            self.add_category(category, keywords)
+
+    def add_category(self, category, keywords):
+        row_position = self.rowCount()
+        self.insertRow(row_position)
+        self.setItem(row_position, 0, QTableWidgetItem(category))
+        self.setItem(row_position, 1, QTableWidgetItem(', '.join(keywords)))
 
 class UserDashboardWindow(QMainWindow):
     def __init__(self):
@@ -93,6 +110,11 @@ class UserDashboardWindow(QMainWindow):
         self.user_id = self.get_or_create_user_id()
         self.api_key = self.user_id  # Set api_key before loading data
         self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
+        
+        # Initialize data structures
+        self.blocked_sites = []
+        self.excluded_sites = []
+        self.categories = {}  # Add categories field
         
         # Initialize connection status label
         self.connection_status = QLabel("WebSocket: Not Connected")
@@ -116,7 +138,7 @@ class UserDashboardWindow(QMainWindow):
         self.register_ip_with_server()
         
         # Load data after api_key is set
-        self.blocked_sites, self.excluded_sites = self.load_data()
+        self.load_data()
         
         self.setup_ui()
         
@@ -253,6 +275,7 @@ class UserDashboardWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
+        self.tab_widget.addTab(self.create_categories_tab(), "Categories")
         self.tab_widget.addTab(self.create_script_execution_tab(), "Script Execution")
         self.setCentralWidget(self.tab_widget)
         self.status_bar = QStatusBar()
@@ -267,6 +290,11 @@ class UserDashboardWindow(QMainWindow):
         self.excluded_table = SiteTable('Excluded Sites')
         self.excluded_table.populate(self.excluded_sites)
         return self.create_tab_layout(self.excluded_table)
+
+    def create_categories_tab(self):
+        self.categories_table = CategoryTable()
+        self.categories_table.populate(self.categories)
+        return self.create_tab_layout(self.categories_table)
 
     def create_tab_layout(self, table_widget):
         layout = QVBoxLayout()
@@ -346,16 +374,20 @@ class UserDashboardWindow(QMainWindow):
             
             if response.status_code == 200:
                 data = response.json()
-                blocked_sites = data.get('blocked_sites', [])
-                excluded_sites = data.get('excluded_sites', [])
-                return blocked_sites, excluded_sites
+                self.blocked_sites = data.get('blocked_sites', [])
+                self.excluded_sites = data.get('excluded_sites', [])
+                self.categories = data.get('categories', {})
+                return self.blocked_sites, self.excluded_sites
             
             # If API request fails, fall back to local file
             logging.info("API request failed, falling back to local settings file")
             if os.path.exists(self.blocked_sites_file):
                 with open(self.blocked_sites_file, 'r') as f:
                     data = json.load(f)
-                    return data.get('blocked_sites', []), data.get('excluded_sites', [])
+                    self.blocked_sites = data.get('blocked_sites', [])
+                    self.excluded_sites = data.get('excluded_sites', [])
+                    self.categories = data.get('categories', {})
+                    return self.blocked_sites, self.excluded_sites
             
             # If both API and local file fail, return empty lists
             return [], []
@@ -367,7 +399,10 @@ class UserDashboardWindow(QMainWindow):
                 if os.path.exists(self.blocked_sites_file):
                     with open(self.blocked_sites_file, 'r') as f:
                         data = json.load(f)
-                        return data.get('blocked_sites', []), data.get('excluded_sites', [])
+                        self.blocked_sites = data.get('blocked_sites', [])
+                        self.excluded_sites = data.get('excluded_sites', [])
+                        self.categories = data.get('categories', {})
+                        return self.blocked_sites, self.excluded_sites
             except Exception as file_error:
                 logging.error(f"Error loading local settings file: {str(file_error)}")
             
@@ -464,17 +499,20 @@ class UserDashboardWindow(QMainWindow):
             # Check if settings have actually changed
             blocked_changed = sorted(blocked_sites) != sorted(self.blocked_sites)
             excluded_changed = sorted(excluded_sites) != sorted(self.excluded_sites)
+            categories_changed = categories != self.categories  # Add categories comparison
             
-            if blocked_changed or excluded_changed:
+            if blocked_changed or excluded_changed or categories_changed:
                 logging.info("Settings have changed, updating UI and local data")
                 
                 # Update local data
                 self.blocked_sites = blocked_sites
                 self.excluded_sites = excluded_sites
+                self.categories = categories  # Update categories
                 
                 # Update UI tables
                 self.blocked_table.populate(self.blocked_sites)
                 self.excluded_table.populate(self.excluded_sites)
+                self.categories_table.populate(self.categories)  # Update categories table
                 
                 # Save to local file as backup
                 try:
@@ -482,7 +520,7 @@ class UserDashboardWindow(QMainWindow):
                         json.dump({
                             'blocked_sites': self.blocked_sites,
                             'excluded_sites': self.excluded_sites,
-                            'categories': categories
+                            'categories': self.categories
                         }, f, indent=4)
                     logging.info("Settings saved to local file")
                 except Exception as save_error:
@@ -502,7 +540,7 @@ class UserDashboardWindow(QMainWindow):
                 json.dump({
                     'blocked_sites': self.blocked_sites,
                     'excluded_sites': self.excluded_sites,
-                    'categories': {}  # We don't store categories in user GUI
+                    'categories': self.categories  # Use the instance categories
                 }, f, indent=4)
             
             logging.info("Proxy settings saved to blocked_sites.json for mitmproxy to reload")
