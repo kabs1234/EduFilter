@@ -2,3 +2,4 @@ __pycache__
 myenv
 .env
 commands.txt
+blocked_sites.json

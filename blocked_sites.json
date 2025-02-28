@@ -1,1 +1,68 @@
-{"sites": ["web.telegram.org", "example.com"], "excluded_sites": ["facebook.com", "twitter.com"], "categories": {"explicit_language_and_profanity": ["curse", "swear", "offensive", "slurs", "profanity"], "violence_and_gore": ["violence", "gore", "graphic", "brutal"], "hate_speech_and_discrimination": ["racist", "sexist", "homophobic", "extremist", "hate"], "illegal_activities": ["drugs", "hacking", "weapons", "illegal"], "bullying_and_harassment": ["bullying", "harassment", "harmful"], "dangerous_or_risky_behavior": ["self-harm", "stunts", "dangerous", "risky"], "explicit_religious_or_political_propaganda": ["religious", "political", "extreme", "divisive"], "addictive_or_distracting_content": ["addictive", "games", "social media", "distracting"], "gambling_and_betting": ["betting", "gambling", "casino", "lottery"]}}
+{
+    "blocked_sites": [
+        "web.telegram.org",
+        "example.com",
+        "github.com"
+    ],
+    "excluded_sites": [
+        "facebook.com",
+        "twitter.com"
+    ],
+    "categories": {
+        "violence_and_gore": [
+            "violence",
+            "gore",
+            "graphic",
+            "brutal"
+        ],
+        "illegal_activities": [
+            "drugs",
+            "hacking",
+            "weapons",
+            "illegal"
+        ],
+        "gambling_and_betting": [
+            "betting",
+            "gambling",
+            "casino",
+            "lottery"
+        ],
+        "bullying_and_harassment": [
+            "bullying",
+            "harassment",
+            "harmful"
+        ],
+        "dangerous_or_risky_behavior": [
+            "self-harm",
+            "stunts",
+            "dangerous",
+            "risky"
+        ],
+        "hate_speech_and_discrimination": [
+            "racist",
+            "sexist",
+            "homophobic",
+            "extremist",
+            "hate"
+        ],
+        "explicit_language_and_profanity": [
+            "curse",
+            "swear",
+            "offensive",
+            "slurs",
+            "profanity"
+        ],
+        "addictive_or_distracting_content": [
+            "addictive",
+            "games",
+            "social media",
+            "distracting"
+        ],
+        "explicit_religious_or_political_propaganda": [
+            "religious",
+            "political",
+            "extreme",
+            "divisive"
+        ]
+    }
+}

@@ -15,6 +15,9 @@ class BlockSites:
         self.load_blocked_sites()
 
     def load_blocked_sites(self):
+        local_file_loaded = False
+        api_error = None
+        
         try:
             # First try to get settings from API
             import requests
@@ -32,7 +35,7 @@ class BlockSites:
                             user_id = line.strip().split('=')[1]
                             break
             except Exception as e:
-                ctx.log.error(f"Error reading USER_ID from .env: {e}")
+                ctx.log.info(f"Could not read USER_ID from .env: {e}")
 
             if user_id:
                 headers = {
@@ -49,8 +52,7 @@ class BlockSites:
                 response = session.get(
                     url,
                     headers=headers,
-                    timeout=5,
-                    verify=False
+                    timeout=5  # Add timeout to prevent hanging
                 )
                 
                 if response.status_code == 200:
@@ -58,25 +60,34 @@ class BlockSites:
                     self.blocked_sites = data.get('blocked_sites', [])
                     self.excluded_sites = data.get('excluded_sites', [])
                     self.category_keywords = data.get('categories', {})
-                    ctx.log.info("Settings loaded successfully from API")
+                    ctx.log.info("Successfully loaded configuration from API")
                     return
                 else:
-                    ctx.log.error(f"Failed to get settings from API (status {response.status_code}), falling back to local file")
-
+                    api_error = f"API returned status code: {response.status_code}"
+                    raise Exception(api_error)
+            
         except Exception as e:
-            ctx.log.error(f"Error fetching settings from API: {e}")
+            api_error = str(e)
+            ctx.log.info(f"Error fetching settings from API: {api_error}")
             ctx.log.info("Falling back to local file")
 
-        # Fallback to local file if API fails
+        # If we get here, try loading from local file
         try:
-            with open(self.blocked_sites_file, 'r') as file:
-                data = json.load(file)
-                self.blocked_sites = data.get("sites", [])
-                self.excluded_sites = data.get("excluded_sites", [])
-                self.category_keywords = data.get("categories", {})
+            with open(self.blocked_sites_file, 'r') as f:
+                data = json.load(f)
+                self.blocked_sites = data.get('blocked_sites', [])
+                self.excluded_sites = data.get('excluded_sites', [])
+                self.category_keywords = data.get('categories', {})
+                local_file_loaded = True
                 ctx.log.info("Configuration loaded successfully from local file.")
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            ctx.log.error(f"Error loading {self.blocked_sites_file}: {e}")
+        except Exception as e:
+            ctx.log.error(f"Error loading local configuration file: {e}")
+            if not local_file_loaded:
+                # If neither API nor local file worked, initialize with empty values
+                self.blocked_sites = []
+                self.excluded_sites = []
+                self.category_keywords = {}
+                ctx.log.info("Initialized with empty configuration")
 
     def create_pattern_for_keywords(self, keywords):
         if not keywords:
