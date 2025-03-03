@@ -12,17 +12,22 @@ class BlockSites:
         self.category_keywords = {}
         self.last_update_time = 0
         self.reload_interval = 5  # Check for updates every 5 seconds
+        self.api_failed = False  # Flag to track API connection failure
         self.load_blocked_sites()
 
     def load_blocked_sites(self):
-        local_file_loaded = False
-        api_error = None
-        
+        # If API previously failed, just load from local file
+        if self.api_failed:
+            self.load_from_local_file()
+            return
+            
         try:
             # First try to get settings from API
             import requests
             import os
             from dotenv import load_dotenv
+            from urllib3.util.retry import Retry
+            from requests.adapters import HTTPAdapter
             load_dotenv()
 
             server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')
@@ -45,49 +50,63 @@ class BlockSites:
                 
                 url = f"{server_url}/api/user-settings/{user_id}/"
                 
-                # Disable the proxy for this request to avoid loop
+                # Configure session with minimal retries
                 session = requests.Session()
-                session.trust_env = False  # Don't use environment proxies
-                
-                response = session.get(
-                    url,
-                    headers=headers,
-                    timeout=5  # Add timeout to prevent hanging
+                retries = Retry(
+                    total=1,  # Only retry once (2 total attempts)
+                    backoff_factor=0.1,  # Quick backoff
+                    status_forcelist=[500, 502, 503, 504]
                 )
+                session.proxies = {
+                    'http': None,
+                    'https': None,
+                }
+                session.trust_env = False
+                adapter = HTTPAdapter(max_retries=retries)
+                session.mount('http://', adapter)
+                session.mount('https://', adapter)
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    self.blocked_sites = data.get('blocked_sites', [])
-                    self.excluded_sites = data.get('excluded_sites', [])
-                    self.category_keywords = data.get('categories', {})
-                    ctx.log.info("Successfully loaded configuration from API")
-                    return
-                else:
-                    api_error = f"API returned status code: {response.status_code}"
-                    raise Exception(api_error)
+                try:
+                    response = session.get(
+                        url,
+                        headers=headers,
+                        timeout=5  # Reduced timeout
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        self.blocked_sites = data.get('blocked_sites', [])
+                        self.excluded_sites = data.get('excluded_sites', [])
+                        self.category_keywords = data.get('categories', {})
+                        ctx.log.info("Successfully loaded configuration from API")
+                        return
+                    else:
+                        raise Exception(f"API returned status code: {response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    raise Exception(f"Network error while connecting to API: {str(e)}")
             
         except Exception as e:
-            api_error = str(e)
-            ctx.log.info(f"Error fetching settings from API: {api_error}")
+            ctx.log.info(f"Error fetching settings from API: {e}")
             ctx.log.info("Falling back to local file")
+            self.api_failed = True  # Mark API as failed to prevent future attempts
+            self.load_from_local_file()
 
-        # If we get here, try loading from local file
+    def load_from_local_file(self):
+        """Load settings from local file."""
         try:
             with open(self.blocked_sites_file, 'r') as f:
                 data = json.load(f)
                 self.blocked_sites = data.get('blocked_sites', [])
                 self.excluded_sites = data.get('excluded_sites', [])
                 self.category_keywords = data.get('categories', {})
-                local_file_loaded = True
                 ctx.log.info("Configuration loaded successfully from local file.")
         except Exception as e:
             ctx.log.error(f"Error loading local configuration file: {e}")
-            if not local_file_loaded:
-                # If neither API nor local file worked, initialize with empty values
-                self.blocked_sites = []
-                self.excluded_sites = []
-                self.category_keywords = {}
-                ctx.log.info("Initialized with empty configuration")
+            # If local file fails, initialize with empty values
+            self.blocked_sites = []
+            self.excluded_sites = []
+            self.category_keywords = {}
+            ctx.log.info("Initialized with empty configuration")
 
     def create_pattern_for_keywords(self, keywords):
         if not keywords:
