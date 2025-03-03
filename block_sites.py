@@ -95,10 +95,35 @@ class BlockSites:
         return re.compile("|".join(rf"\b{re.escape(keyword)}\b" for keyword in keywords), re.IGNORECASE)
 
     def is_excluded(self, host):
-        # Check if it's the user settings API endpoint
-        if '/api/user-settings/' in host or any(excluded in host for excluded in self.excluded_sites):
+        # Always allow localhost and local network
+        if host in ['localhost', '127.0.0.1', '::1'] or '.local' in host:
             return True
+            
+        # Always allow the server URL
+        server_host = self.get_server_host()
+        if server_host and server_host in host:
+            return True
+
+        # Check excluded sites
+        for excluded in self.excluded_sites:
+            if excluded in host:
+                return True
+                
         return False
+
+    def get_server_host(self):
+        """Extract host from SERVER_URL in .env"""
+        try:
+            from urllib.parse import urlparse
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            
+            server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')
+            parsed = urlparse(server_url)
+            return parsed.netloc
+        except:
+            return None
 
     def show_warning_page(self, flow, message):
         """Respond with a custom warning page."""
@@ -119,6 +144,10 @@ class BlockSites:
         )
 
     def request(self, flow: mitmproxy.http.HTTPFlow) -> None:
+        # Skip if no host
+        if not flow.request.host:
+            return
+            
         import time
         current_time = time.time()
         if current_time - self.last_update_time > self.reload_interval:
@@ -136,20 +165,24 @@ class BlockSites:
                 return
 
     def response(self, flow: mitmproxy.http.HTTPFlow) -> None:
-        if self.is_excluded(flow.request.host) or '/api/user-settings/' in flow.request.pretty_url:
+        # Skip if no host or is excluded
+        if not flow.request.host or self.is_excluded(flow.request.host):
             return
 
         try:
             if flow.response and flow.response.content:
-                content = flow.response.content.decode('utf-8', errors='ignore')
-                for category, keywords in self.category_keywords.items():
-                    pattern = self.create_pattern_for_keywords(keywords)
-                    if pattern:
-                        matches = pattern.findall(content)
-                        if matches:  # Block if any keyword is found
-                            self.show_warning_page(flow, f"Blocked due to inappropriate content in category: {category}.")
-                            ctx.log.info(f"Blocked content from {flow.request.pretty_url} due to category: {category}")
-                            return
+                content_type = flow.response.headers.get("content-type", "")
+                # Only check text content
+                if "text" in content_type or "javascript" in content_type:
+                    content = flow.response.content.decode('utf-8', errors='ignore')
+                    for category, keywords in self.category_keywords.items():
+                        pattern = self.create_pattern_for_keywords(keywords)
+                        if pattern:
+                            matches = pattern.findall(content)
+                            if matches:  # Block if any keyword is found
+                                self.show_warning_page(flow, f"Blocked due to inappropriate content in category: {category}.")
+                                ctx.log.info(f"Blocked content from {flow.request.pretty_url} due to category: {category}")
+                                return
         except Exception as e:
             ctx.log.error(f"Error processing response: {e}")
 

@@ -5,9 +5,11 @@ import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QMessageBox,
-    QTabWidget, QStatusBar, QLabel, QHBoxLayout, QFormLayout
+    QTabWidget, QStatusBar, QLabel, QHBoxLayout, QFormLayout,
+    QSystemTrayIcon, QMenu, QStyle
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtNetwork import QNetworkProxy
 from PyQt6.QtWebSockets import QWebSocket
 from dotenv import load_dotenv
@@ -115,6 +117,9 @@ class UserDashboardWindow(QMainWindow):
         self.blocked_sites = []
         self.excluded_sites = []
         self.categories = {}  # Add categories field
+        
+        # Create system tray icon
+        self.create_tray_icon()
         
         # Initialize connection status label
         self.connection_status = QLabel("WebSocket: Not Connected")
@@ -562,50 +567,111 @@ class UserDashboardWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error reloading proxy settings: {str(e)}", exc_info=True)
 
-    def closeEvent(self, event):
-        confirmation = QMessageBox.question(
-            self, "Confirm Exit", "Are you sure you want to exit?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if confirmation == QMessageBox.StandardButton.Yes:
-            try:
-                # First close WebSocket connection if it exists
-                if hasattr(self, 'websocket'):
-                    try:
-                        self.websocket.close()
-                    except:
-                        pass  # Ignore WebSocket closure errors
-                
-                # Stop the status server if it exists
-                if hasattr(self, 'status_server'):
-                    try:
-                        self.status_server.shutdown()
-                        self.status_server.server_close()
-                    except:
-                        pass
-                
-                # Disable proxy
-                disable_windows_proxy()
-                
-                # Unregister IP (this might need database)
-                try:
-                    self.unregister_ip()
-                except:
-                    pass  # Ignore any final cleanup errors
-                
-                # Accept the close event
-                event.accept()
-            except Exception as e:
-                print(f"Error during final cleanup: {e}")
-                event.accept()
+    def create_tray_icon(self):
+        """Create and set up the system tray icon"""
+        # Create the tray icon
+        self.tray_icon = QSystemTrayIcon(self)
+        
+        # Load custom icon if available, otherwise use default
+        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'edufilter.ico')
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
         else:
-            event.ignore()
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
+        
+        # Create the tray menu
+        tray_menu = QMenu()
+        
+        # Add menu items
+        show_action = QAction("Show", self)
+        show_action.triggered.connect(self.show)
+        
+        hide_action = QAction("Hide", self)
+        hide_action.triggered.connect(self.hide)
+        
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self.quit_application)
+        
+        # Add actions to menu
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(hide_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(quit_action)
+        
+        # Set the tray menu
+        self.tray_icon.setContextMenu(tray_menu)
+        
+        # Make the tray icon visible
+        self.tray_icon.show()
+        
+        # Connect double click action
+        self.tray_icon.activated.connect(self.tray_icon_activated)
 
+    def tray_icon_activated(self, reason):
+        """Handle tray icon activation"""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show()
+                self.activateWindow()
+
+    def quit_application(self):
+        """Clean up and quit the application"""
+        # Cleanup code here (stop servers, close connections, etc.)
+        if hasattr(self, 'status_server'):
+            self.status_server.shutdown()
+            self.status_server.server_close()
+        
+        if hasattr(self, 'websocket'):
+            self.websocket.close()
+        
+        disable_windows_proxy()
+        
+        # Hide tray icon before quitting
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+        
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        """Handle the window close event"""
+        if self.tray_icon.isVisible():
+            self.hide()
+            self.tray_icon.showMessage(
+                "EduFilter",
+                "Application is still running in the system tray.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+            event.ignore()
+        else:
+            self.quit_application()
+            event.accept()
 
 if __name__ == '__main__':
     import sys
     launch_proxy()
     app = QApplication(sys.argv)
+    
+    # Enable system tray if supported
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        QMessageBox.critical(None, "System Tray",
+                           "System tray is not available on this system")
+        sys.exit(1)
+    
+    # Create and show the main window
     window = UserDashboardWindow()
     window.show()
-    sys.exit(app.exec())
+    
+    # Start the event loop
+    try:
+        sys.exit(app.exec())
+    except SystemExit:
+        # Clean up when the application is closing
+        if hasattr(window, 'status_server'):
+            window.status_server.shutdown()
+            window.status_server.server_close()
+        if hasattr(window, 'websocket'):
+            window.websocket.close()
+        disable_windows_proxy()

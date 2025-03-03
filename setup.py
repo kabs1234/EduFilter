@@ -6,13 +6,17 @@ build_exe_options = {
     "packages": [
         "json", "os", "sys", "uuid", "socket", "threading", "logging",
         "http.server", "datetime", "random", "string", "requests",
-        "dotenv", "psycopg2", "PyQt6", "email_utils"
+        "dotenv", "psycopg2", "PyQt6", "email_utils",
+        "mitmproxy", "mitmproxy.http", "mitmproxy.ctx", "urllib.parse",
+        "re", "winreg"  # Added winreg for Windows registry operations
     ],
     "excludes": [],
     "include_files": [
         "blocked_sites.json",
         ".env",
         "admin_utils/",
+        "icons/",  # Include icons directory
+        "block_sites.py",  # Include the proxy script
     ]
 }
 
@@ -26,13 +30,13 @@ executables = [
         "admin_panel.py",
         base=base,
         target_name="admin_panel.exe",
-        icon=None  # You can add an icon file here if you have one
+        icon="icons/edufilter.ico"  # Set icon for admin panel
     ),
     Executable(
         "user_gui.py",
         base=base,
         target_name="user_gui.exe",
-        icon=None  # You can add an icon file here if you have one
+        icon="icons/edufilter.ico"  # Set icon for user GUI
     )
 ]
 
@@ -41,5 +45,4 @@ setup(
     version="1.0",
     description="Content Monitoring and Filtering System",
     options={"build_exe": build_exe_options},
-    executables=executables
-)
+    executables=executables)
