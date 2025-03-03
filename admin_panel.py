@@ -440,13 +440,13 @@ class DashboardWindow(QMainWindow):
         try:
             with open(self.blocked_sites_file, 'r') as file:
                 data = json.load(file)
-                return data.get("sites", []), data.get("excluded_sites", []), data.get("categories", {})
+                return data.get("blocked_sites", []), data.get("excluded_sites", []), data.get("categories", {})
         except (FileNotFoundError, json.JSONDecodeError):
             return [], [], {}
 
     def save_data(self):
         data = {
-            "sites": self.blocked_sites,
+            "blocked_sites": self.blocked_sites,
             "excluded_sites": self.excluded_sites,
             "categories": self.category_keywords
         }
