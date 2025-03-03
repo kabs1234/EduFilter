@@ -38,3 +38,22 @@ After making changes to models, create new migration files:
 cd server
 python manage.py makemigrations
 ```
+
+## Build Executable Files
+To create Windows executable files (.exe) for both admin panel and user GUI:
+
+1. First, install cx_Freeze if not already installed:
+```bash
+pip install cx_Freeze
+```
+
+2. Build the executables:
+```bash
+python setup.py build
+```
+
+The executables will be created in the `build/exe.win-amd64-3.10` directory:
+- `admin_panel.exe` - Administrator interface
+- `user_gui.exe` - User interface
+
+Note: When distributing the application, include the entire `build/exe.win-amd64-3.10` directory as it contains all necessary dependencies.
