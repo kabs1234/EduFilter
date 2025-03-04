@@ -626,6 +626,9 @@ class UserDashboardWindow(QMainWindow):
         if hasattr(self, 'websocket'):
             self.websocket.close()
         
+        # Unregister IP from server before quitting
+        self.unregister_ip()
+        
         disable_windows_proxy()
         
         # Hide tray icon before quitting
