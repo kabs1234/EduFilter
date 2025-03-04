@@ -32,11 +32,13 @@ def set_proxy_automatically():
     elevate.elevate()
     set_windows_proxy()
 
-
-# Function to start mitmproxy
 def start_mitmproxy():
     try:
-        subprocess.Popen(['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
+        # Add creationflags to hide the console window
+        subprocess.Popen(
+            ['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'],
+            creationflags=subprocess.CREATE_NO_WINDOW  # <-- Add this line for Windows
+        )
         print("mitmproxy is running at 127.0.0.1:8080")
     except Exception as e:
         print(f"Error starting mitmproxy: {e}")
