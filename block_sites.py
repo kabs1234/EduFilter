@@ -12,87 +12,10 @@ class BlockSites:
         self.category_keywords = {}
         self.last_update_time = 0
         self.reload_interval = 5  # Check for updates every 5 seconds
-        self.api_failed = False  # Flag to track API connection failure
         self.load_blocked_sites()
 
     def load_blocked_sites(self):
-        # If API previously failed, just load from local file
-        if self.api_failed:
-            self.load_from_local_file()
-            return
-            
-        try:
-            # First try to get settings from API
-            import requests
-            import os
-            from dotenv import load_dotenv
-            from urllib3.util.retry import Retry
-            from requests.adapters import HTTPAdapter
-            load_dotenv()
-
-            server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')
-            # Get the user ID from the .env file
-            user_id = None
-            try:
-                with open('.env', 'r') as f:
-                    for line in f:
-                        if line.startswith('USER_ID='):
-                            user_id = line.strip().split('=')[1]
-                            break
-            except Exception as e:
-                ctx.log.info(f"Could not read USER_ID from .env: {e}")
-
-            if user_id:
-                headers = {
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {user_id}'
-                }
-                
-                url = f"{server_url}/api/user-settings/{user_id}/"
-                
-                # Configure session with minimal retries
-                session = requests.Session()
-                retries = Retry(
-                    total=1,  # Only retry once (2 total attempts)
-                    backoff_factor=0.1,  # Quick backoff
-                    status_forcelist=[500, 502, 503, 504]
-                )
-                session.proxies = {
-                    'http': None,
-                    'https': None,
-                }
-                session.trust_env = False
-                adapter = HTTPAdapter(max_retries=retries)
-                session.mount('http://', adapter)
-                session.mount('https://', adapter)
-                
-                try:
-                    response = session.get(
-                        url,
-                        headers=headers,
-                        timeout=5  # Reduced timeout
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        self.blocked_sites = data.get('blocked_sites', [])
-                        self.excluded_sites = data.get('excluded_sites', [])
-                        self.category_keywords = data.get('categories', {})
-                        ctx.log.info("Successfully loaded configuration from API")
-                        return
-                    else:
-                        raise Exception(f"API returned status code: {response.status_code}")
-                except requests.exceptions.RequestException as e:
-                    raise Exception(f"Network error while connecting to API: {str(e)}")
-            
-        except Exception as e:
-            ctx.log.info(f"Error fetching settings from API: {e}")
-            ctx.log.info("Falling back to local file")
-            self.api_failed = True  # Mark API as failed to prevent future attempts
-            self.load_from_local_file()
-
-    def load_from_local_file(self):
-        """Load settings from local file."""
+        """Load settings from local file only."""
         try:
             with open(self.blocked_sites_file, 'r') as f:
                 data = json.load(f)
