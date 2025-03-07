@@ -36,7 +36,7 @@ def start_mitmproxy():
     try:
         # Add creationflags to hide the console window
         subprocess.Popen(
-            ['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'],
+            ['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py']
         )
         print("mitmproxy is running at 127.0.0.1:8080")
     except Exception as e:

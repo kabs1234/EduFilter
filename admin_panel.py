@@ -10,8 +10,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, QUrl
 from PyQt6.QtWebSockets import QWebSocket, QWebSocketProtocol
 from PyQt6.QtNetwork import QAbstractSocket
-from setup_proxy_and_mitm import launch_proxy, disable_windows_proxy
-import subprocess
 import random
 import string
 from datetime import datetime, timedelta
@@ -484,7 +482,7 @@ class DashboardWindow(QMainWindow):
                     self.excluded_table.populate(self.excluded_sites)
 
                 self.save_data()
-                self.restart_mitmproxy()
+                self.notify_settings_change()
 
     def delete_selected_site(self):
         current_tab = self.tabs.currentWidget()
@@ -521,7 +519,7 @@ class DashboardWindow(QMainWindow):
             sites_list.remove(site)
             table.populate(sites_list)
             self.save_data()
-            self.restart_mitmproxy()
+            self.notify_settings_change()
 
     def add_category(self):
         category_name, ok = DialogManager.show_input_dialog(
@@ -540,7 +538,7 @@ class DashboardWindow(QMainWindow):
                 self.category_keywords[category_name] = keywords_list
                 self.save_data()
                 self.categories_table.populate(self.category_keywords)
-                self.restart_mitmproxy()
+                self.notify_settings_change()
 
     def delete_category(self):
         if self.categories_table.currentRow() == -1:
@@ -562,11 +560,15 @@ class DashboardWindow(QMainWindow):
                 del self.category_keywords[category_name]
                 self.save_data()
                 self.categories_table.populate(self.category_keywords)
-                self.restart_mitmproxy()
+                self.notify_settings_change()
 
-    def restart_mitmproxy(self):
-        subprocess.call(["taskkill", "/F", "/IM", "mitmdump.exe"])
-        subprocess.Popen(['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py'])
+    def notify_settings_change(self):
+        """Notify clients about settings changes via WebSocket"""
+        if self.websocket.state() == QAbstractSocket.SocketState.ConnectedState:
+            self.websocket.sendTextMessage(json.dumps({
+                'type': 'settings_change',
+                'message': 'Global settings updated'
+            }))
 
     def load_user_settings(self, user_id):
         print(f"Loading settings for user ID: {user_id}")  # Debug log
@@ -961,14 +963,11 @@ class DashboardWindow(QMainWindow):
                     except:
                         pass  # Ignore WebSocket closure errors
                 
-                # Save current data (might need database)
+                # Save current data
                 try:
                     self.save_data()
                 except Exception as e:
                     print(f"Error saving data: {e}")
-                
-                # Disable proxy
-                disable_windows_proxy()
                 
                 # Accept the close event
                 event.accept()
@@ -982,7 +981,6 @@ class DashboardWindow(QMainWindow):
 if __name__ == '__main__':
     import sys
     from PyQt6.QtWidgets import QApplication
-    launch_proxy()
     app = QApplication(sys.argv)
     
     login_dialog = LoginDialog()
