@@ -3,7 +3,7 @@ import winreg as reg
 import elevate
 
 # Function to set the proxy in Windows registry
-def set_windows_proxy(proxy_address='127.0.0.1', proxy_port=8080):
+def set_windows_proxy(proxy_address='127.0.0.1', proxy_port=8082):
     try:
         registry_key = reg.OpenKey(
             reg.HKEY_CURRENT_USER,
@@ -36,9 +36,9 @@ def start_mitmproxy():
     try:
         # Add creationflags to hide the console window
         subprocess.Popen(
-            ['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8080', '-s', 'block_sites.py']
+            ['mitmdump', '--listen-host', '127.0.0.1', '--listen-port', '8082', '-s', 'block_sites.py']
         )
-        print("mitmproxy is running at 127.0.0.1:8080")
+        print("mitmproxy is running at 127.0.0.1:8082")
     except Exception as e:
         print(f"Error starting mitmproxy: {e}")
 
