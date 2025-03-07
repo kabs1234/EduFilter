@@ -242,6 +242,9 @@ class UserDashboardWindow(QMainWindow):
         self.api_key = self.user_id  # Set api_key before loading data
         self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
         
+        # Flag to track if settings have been loaded
+        self.settings_loaded = False
+        
         # Initialize data structures
         self.blocked_sites = []
         self.excluded_sites = []
@@ -274,9 +277,10 @@ class UserDashboardWindow(QMainWindow):
         # Register IP with main server
         self.register_ip_with_server()
         
-        # Load data after api_key is set
+        # Load data after api_key is set - only once
         self.load_data()
         
+        # Setup UI after loading data
         self.setup_ui()
         
         # Connect to WebSocket after UI is set up
@@ -498,6 +502,11 @@ class UserDashboardWindow(QMainWindow):
 
     def load_data(self):
         """Fetch user settings from the server or use defaults from blocked_sites.json."""
+        # Skip if settings are already loaded
+        if self.settings_loaded:
+            logging.info("Settings already loaded, skipping duplicate request")
+            return self.blocked_sites, self.excluded_sites
+            
         try:
             # First try to get settings from API
             headers = {
@@ -507,6 +516,7 @@ class UserDashboardWindow(QMainWindow):
             
             url = f"{self.server_url}/api/user-settings/{self.user_id}/"
             
+            logging.info(f"Fetching settings from API: {url}")
             response = requests.get(
                 url,
                 headers=headers,
@@ -519,6 +529,21 @@ class UserDashboardWindow(QMainWindow):
                 self.blocked_sites = data.get('blocked_sites', [])
                 self.excluded_sites = data.get('excluded_sites', [])
                 self.categories = data.get('categories', {})
+                
+                # Save settings to local file as backup
+                try:
+                    with open(self.blocked_sites_file, 'w') as f:
+                        json.dump({
+                            'blocked_sites': self.blocked_sites,
+                            'excluded_sites': self.excluded_sites,
+                            'categories': self.categories
+                        }, f, indent=4)
+                    logging.info("Settings saved to local file")
+                except Exception as save_error:
+                    logging.error(f"Error saving settings to local file: {str(save_error)}")
+                
+                # Mark settings as loaded to prevent duplicate requests
+                self.settings_loaded = True
                 return self.blocked_sites, self.excluded_sites
             
             # If API request fails, fall back to local file
@@ -529,6 +554,8 @@ class UserDashboardWindow(QMainWindow):
                     self.blocked_sites = data.get('blocked_sites', [])
                     self.excluded_sites = data.get('excluded_sites', [])
                     self.categories = data.get('categories', {})
+                    # Mark settings as loaded to prevent duplicate requests
+                    self.settings_loaded = True
                     return self.blocked_sites, self.excluded_sites
             
             # If both API and local file fail, return empty lists
@@ -544,6 +571,8 @@ class UserDashboardWindow(QMainWindow):
                         self.blocked_sites = data.get('blocked_sites', [])
                         self.excluded_sites = data.get('excluded_sites', [])
                         self.categories = data.get('categories', {})
+                        # Mark settings as loaded to prevent duplicate requests
+                        self.settings_loaded = True
                         return self.blocked_sites, self.excluded_sites
             except Exception as file_error:
                 logging.error(f"Error loading local settings file: {str(file_error)}")
