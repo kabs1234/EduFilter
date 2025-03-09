@@ -2,11 +2,12 @@ import json
 import os
 import requests
 import uuid
+import hashlib
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QPushButton, QWidget, QLineEdit, QMessageBox,
     QTabWidget, QStatusBar, QLabel, QHBoxLayout, QFormLayout,
-    QSystemTrayIcon, QMenu, QStyle
+    QSystemTrayIcon, QMenu, QStyle, QDialog, QGridLayout, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QIcon, QAction
@@ -104,11 +105,139 @@ class CategoryTable(QTableWidget):
         self.setItem(row_position, 0, QTableWidgetItem(category))
         self.setItem(row_position, 1, QTableWidgetItem(', '.join(keywords)))
 
+class AdminLoginDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Admin Authentication")
+        self.setFixedWidth(300)
+        self.setFixedHeight(150)
+        
+        layout = QGridLayout()
+        
+        # Password field
+        self.password_label = QLabel("Password:")
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.password_label, 0, 0)
+        layout.addWidget(self.password_input, 0, 1)
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box, 1, 0, 1, 2)
+        
+        self.setLayout(layout)
+    
+    def get_password(self):
+        return self.password_input.text()
+
+class AdminPanel(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Admin Panel")
+        self.setFixedWidth(300)
+        self.setFixedHeight(200)
+        
+        layout = QVBoxLayout()
+        
+        # Settings button
+        self.settings_btn = QPushButton("Access Settings")
+        self.settings_btn.clicked.connect(self.show_settings)
+        layout.addWidget(self.settings_btn)
+        
+        # Exit button
+        self.exit_btn = QPushButton("Exit Program")
+        self.exit_btn.clicked.connect(self.exit_program)
+        layout.addWidget(self.exit_btn)
+        
+        # Change password button
+        self.change_pwd_btn = QPushButton("Change Admin Password")
+        self.change_pwd_btn.clicked.connect(self.change_password)
+        layout.addWidget(self.change_pwd_btn)
+        
+        # Cancel button
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(self.cancel_btn)
+        
+        self.setLayout(layout)
+    
+    def show_settings(self):
+        # Show settings tab and main window
+        if hasattr(self.parent, 'tab_widget'):
+            self.parent.tab_widget.setTabVisible(3, True)  # Make script execution tab visible
+            self.parent.show()  # Show the main window
+            self.parent.activateWindow()  # Bring window to front
+            self.accept()  # Close admin panel
+    
+    def exit_program(self):
+        # Exit the application
+        self.accept()
+        self.parent.quit_application()
+    
+    def change_password(self):
+        # Open dialog to change password
+        try:
+            # Create a proper dialog for password change instead of using getText
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Change Admin Password")
+            dialog.setFixedWidth(300)
+            dialog.setFixedHeight(150)
+            
+            layout = QGridLayout()
+            
+            # New password field
+            new_pwd_label = QLabel("New Password:")
+            new_pwd_input = QLineEdit()
+            new_pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
+            layout.addWidget(new_pwd_label, 0, 0)
+            layout.addWidget(new_pwd_input, 0, 1)
+            
+            # Confirm password field
+            confirm_pwd_label = QLabel("Confirm Password:")
+            confirm_pwd_input = QLineEdit()
+            confirm_pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
+            layout.addWidget(confirm_pwd_label, 1, 0)
+            layout.addWidget(confirm_pwd_input, 1, 1)
+            
+            # Buttons
+            button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box, 2, 0, 1, 2)
+            
+            dialog.setLayout(layout)
+            
+            # Show dialog and process result
+            if dialog.exec():
+                new_pwd = new_pwd_input.text()
+                confirm_pwd = confirm_pwd_input.text()
+                
+                if not new_pwd:
+                    QMessageBox.warning(self, "Error", "Password cannot be empty.")
+                    return
+                
+                if new_pwd != confirm_pwd:
+                    QMessageBox.warning(self, "Error", "Passwords do not match.")
+                    return
+                
+                # Hash the password and save it
+                hashed_pwd = hashlib.sha256(new_pwd.encode()).hexdigest()
+                self.parent.save_admin_password(hashed_pwd)
+                QMessageBox.information(self, "Success", "Admin password changed successfully.")
+        
+        except Exception as e:
+            logging.error(f"Error changing password: {str(e)}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+
 class UserDashboardWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Content Monitoring - User Mode')
         self.blocked_sites_file = 'blocked_sites.json'
+        self.admin_config_file = 'admin_config.json'
         self.user_id = self.get_or_create_user_id()
         self.api_key = self.user_id  # Set api_key before loading data
         self.server_url = os.getenv('SERVER_URL', 'http://127.0.0.1:8000')  # Use localhost as default
@@ -117,6 +246,9 @@ class UserDashboardWindow(QMainWindow):
         self.blocked_sites = []
         self.excluded_sites = []
         self.categories = {}  # Add categories field
+        
+        # Initialize admin password if not exists
+        self.init_admin_password()
         
         # Create system tray icon
         self.create_tray_icon()
@@ -281,7 +413,12 @@ class UserDashboardWindow(QMainWindow):
         self.tab_widget.addTab(self.create_blocked_sites_tab(), "Blocked Sites")
         self.tab_widget.addTab(self.create_excluded_sites_tab(), "Excluded Sites")
         self.tab_widget.addTab(self.create_categories_tab(), "Categories")
-        self.tab_widget.addTab(self.create_script_execution_tab(), "Script Execution")
+        
+        # Hide the script execution tab by default - only accessible through admin panel
+        self.script_execution_tab = self.create_script_execution_tab()
+        self.tab_widget.addTab(self.script_execution_tab, "Script Execution")
+        self.tab_widget.setTabVisible(3, False)  # Hide the script execution tab
+        
         self.setCentralWidget(self.tab_widget)
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -567,6 +704,45 @@ class UserDashboardWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error reloading proxy settings: {str(e)}", exc_info=True)
 
+    def init_admin_password(self):
+        """Initialize admin password if it doesn't exist"""
+        if not os.path.exists(self.admin_config_file):
+            # Default password is "admin" - hashed
+            default_pwd = hashlib.sha256("admin".encode()).hexdigest()
+            self.save_admin_password(default_pwd)
+    
+    def save_admin_password(self, hashed_password):
+        """Save admin password to config file"""
+        with open(self.admin_config_file, 'w') as f:
+            json.dump({"admin_password": hashed_password}, f)
+    
+    def verify_admin_password(self, password):
+        """Verify if the provided password matches the admin password"""
+        try:
+            with open(self.admin_config_file, 'r') as f:
+                config = json.load(f)
+                stored_hash = config.get("admin_password", "")
+                input_hash = hashlib.sha256(password.encode()).hexdigest()
+                return stored_hash == input_hash
+        except Exception as e:
+            logging.error(f"Error verifying admin password: {str(e)}")
+            return False
+    
+    def show_admin_login(self):
+        """Show admin login dialog and verify credentials"""
+        dialog = AdminLoginDialog(self)
+        if dialog.exec():
+            password = dialog.get_password()
+            if self.verify_admin_password(password):
+                self.show_admin_panel()
+            else:
+                QMessageBox.warning(self, "Authentication Failed", "Incorrect password.")
+    
+    def show_admin_panel(self):
+        """Show admin panel with options to exit program and access settings"""
+        panel = AdminPanel(self)
+        panel.exec()
+
     def create_tray_icon(self):
         """Create and set up the system tray icon"""
         # Create the tray icon
@@ -582,21 +758,12 @@ class UserDashboardWindow(QMainWindow):
         # Create the tray menu
         tray_menu = QMenu()
         
-        # Add menu items
-        show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show)
+        # Add only the admin panel option
+        admin_action = QAction("Admin Panel", self)
+        admin_action.triggered.connect(self.show_admin_login)
         
-        hide_action = QAction("Hide", self)
-        hide_action.triggered.connect(self.hide)
-        
-        quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(self.quit_application)
-        
-        # Add actions to menu
-        tray_menu.addAction(show_action)
-        tray_menu.addAction(hide_action)
-        tray_menu.addSeparator()
-        tray_menu.addAction(quit_action)
+        # Add action to menu
+        tray_menu.addAction(admin_action)
         
         # Set the tray menu
         self.tray_icon.setContextMenu(tray_menu)
@@ -604,7 +771,7 @@ class UserDashboardWindow(QMainWindow):
         # Make the tray icon visible
         self.tray_icon.show()
         
-        # Connect double click action
+        # Connect double click action to show the main window
         self.tray_icon.activated.connect(self.tray_icon_activated)
 
     def tray_icon_activated(self, reason):
@@ -649,8 +816,18 @@ class UserDashboardWindow(QMainWindow):
             )
             event.ignore()
         else:
-            self.quit_application()
-            event.accept()
+            # Show admin authentication before allowing close
+            dialog = AdminLoginDialog(self)
+            if dialog.exec():
+                password = dialog.get_password()
+                if self.verify_admin_password(password):
+                    self.quit_application()
+                    event.accept()
+                else:
+                    QMessageBox.warning(self, "Authentication Failed", "Incorrect password.")
+                    event.ignore()
+            else:
+                event.ignore()
 
 if __name__ == '__main__':
     import sys
@@ -663,9 +840,11 @@ if __name__ == '__main__':
                            "System tray is not available on this system")
         sys.exit(1)
     
-    # Create and show the main window
+    # Create the main window but don't show it initially
     window = UserDashboardWindow()
-    window.show()
+    
+    # Hide the window on startup - user will need to access it through admin panel
+    # window.show()  # Comment out this line to hide on startup
     
     # Start the event loop
     try:
