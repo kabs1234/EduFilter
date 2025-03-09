@@ -806,11 +806,8 @@ class UserDashboardWindow(QMainWindow):
     def tray_icon_activated(self, reason):
         """Handle tray icon activation"""
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show()
-                self.activateWindow()
+            # Show admin login dialog instead of directly showing the main window
+            self.show_admin_login()
 
     def quit_application(self):
         """Clean up and quit the application"""
