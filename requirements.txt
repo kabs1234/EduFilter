@@ -7,11 +7,10 @@ psycopg2==2.9.9
 django-debug-toolbar==4.2.0
 django-extensions==3.2.3
 pyotp==2.8.0
-qrcode[pil]==7.4.2
 python-dotenv==1.0.0
 Django==5.0.0
-gunicorn==21.2.0
 requests==2.31.0
 websockets==12.0
 channels==4.0.0
 daphne==4.1.0
+cx_Freeze==6.15.0
